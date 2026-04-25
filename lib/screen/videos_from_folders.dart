@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../functions/gobal_functions.dart';
+import 'video_player_page.dart';
 
 class VideosFromFolder extends StatefulWidget {
   final AssetPathEntity folder;
@@ -83,15 +84,15 @@ class _VideosFromFolderState extends State<VideosFromFolder> {
                         ),
                       ),
                       onTap: () {
-                        // Navigator.push(
-                        //   context,
-                        //   MaterialPageRoute(
-                        //     builder: (context) => VideoPLayerPage(
-                        //       videoList: _videos,
-                        //       initialIndex: index,
-                        //     ),
-                        //   ),
-                        // );
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => VideoPLayerPage(
+                              videoList: _videos,
+                              initialIndex: index,
+                            ),
+                          ),
+                        );
                       },
                       subtitle: Wrap(
                         children: [

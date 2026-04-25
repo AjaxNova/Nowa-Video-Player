@@ -32,14 +32,11 @@ class Nova extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: Colors.black,
       ),
-      home: MultiProvider(providers: [
-        ChangeNotifierProvider(
-          create: (context) => VideoDataProvider(),
-        )
-      ], child: const SplashScreen()),
+      home: const SplashScreen(),
     );
   }
 }

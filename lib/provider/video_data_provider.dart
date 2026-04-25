@@ -6,37 +6,77 @@ class VideoDataProvider with ChangeNotifier {
   List<AssetEntity> allVideosList = [];
   List<AssetPathEntity>? allFoldersList;
 
-  fetchvideos(BuildContext context) async {
-    // setState(() => isLoading = true);
+  Future<void> fetchvideos(BuildContext context) async {
+    try {
+      // Check permission first - REQUEST VIDEOS ONLY
+      final PermissionState ps = await PhotoManager.requestPermissionExtend(
+        requestOption: const PermissionRequestOption(
+          androidPermission: AndroidPermission(
+            type: RequestType.video, // Only videos
+            mediaLocation: false,
+          ),
+        ),
+      );
 
-    final albums = await PhotoManager.getAssetPathList(type: RequestType.video);
-    final recentAlbum = albums.first;
-    final assetCount = await recentAlbum.assetCountAsync;
-    final recentAssets =
-        await recentAlbum.getAssetListRange(start: 0, end: assetCount - 1);
+      if (!ps.isAuth && !ps.hasAccess && !ps.isLimited) {
+        debugPrint('Permission denied');
+        return;
+      }
 
-    // dummyAssets.sort((a, b) => a.title!.compareTo(b.title!));
-    // final List<AssetEntity> videoList = dummyAssets;
-    allVideosList = recentAssets.toList();
-    notifyListeners();
-    allFoldersList = albums;
-    notifyListeners();
+      final albums =
+          await PhotoManager.getAssetPathList(type: RequestType.video);
 
-    Future.delayed(
-      const Duration(seconds: 1),
-      () => Navigator.of(context).push(MaterialPageRoute(
-        builder: (context) =>
-            const AllVideosPage(assets: [], foldersWithVideos: []),
-      )),
-    );
+      if (albums.isEmpty) {
+        debugPrint('No video albums found');
+        allVideosList = [];
+        allFoldersList = [];
+        notifyListeners();
+        return;
+      }
 
-    // setState(() {
-    //   allFolderswithVideos = albums;
-    //   allVideosList = recentAssets.toList();
-    //   isLoading = false;
-    // });
-    // final dummyAssets = recentAssets;
-    // fetchVideosForAddVideoPage(dummyAssets: dummyAssets);
-    // gotoHome();
+      final recentAlbum = albums.first;
+      final assetCount = await recentAlbum.assetCountAsync;
+
+      if (assetCount == 0) {
+        debugPrint('No videos in recent album');
+        allVideosList = [];
+        allFoldersList = albums;
+        notifyListeners();
+        return;
+      }
+
+      final recentAssets =
+          await recentAlbum.getAssetListRange(start: 0, end: assetCount);
+
+      allVideosList = recentAssets.toList();
+      allFoldersList = albums;
+      notifyListeners();
+
+      debugPrint(
+          '✅ Loaded ${allVideosList.length} videos from ${allFoldersList?.length} folders');
+
+      // Navigate to AllVideosPage with ACTUAL data
+      Future.delayed(
+        const Duration(seconds: 1),
+        () {
+          if (context.mounted) {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (context) => AllVideosPage(
+                  assets: allVideosList, // ✅ Pass actual videos!
+                  foldersWithVideos:
+                      allFoldersList ?? [], // ✅ Pass actual folders!
+                ),
+              ),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      debugPrint('Error in fetchvideos: $e');
+      allVideosList = [];
+      allFoldersList = [];
+      notifyListeners();
+    }
   }
 }

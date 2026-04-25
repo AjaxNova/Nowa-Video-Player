@@ -250,12 +250,11 @@ class _AllVideosPageState extends State<AllVideosPage> {
                             );
                           },
                           controller: _scrollController,
-                          itemCount: value.allVideosList.length,
+                          itemCount: startSong.length,
                           itemBuilder: (context, index) {
                             return ListTile(
                                 leading: FutureBuilder<Uint8List?>(
-                                  future:
-                                      value.allVideosList[index].thumbnailData,
+                                  future: startSong[index].thumbnailData,
                                   builder: (BuildContext context,
                                       AsyncSnapshot<Uint8List?> snapshot) {
                                     if (!FavoriteDb.isInitialized) {
@@ -295,8 +294,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                                               ),
                                               child: Text(
                                                 durationToString(
-                                                  value.allVideosList[index]
-                                                      .duration,
+                                                  startSong[index].duration,
                                                 ),
                                                 style: const TextStyle(
                                                   color: Colors.white,
@@ -323,8 +321,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                                 title: Container(
                                   margin: const EdgeInsets.only(bottom: 16),
                                   child: Text(
-                                    value.allVideosList[index].title ??
-                                        'Unnamed',
+                                    startSong[index].title ?? 'Unnamed',
                                     maxLines: 1,
                                     style: const TextStyle(color: Colors.white),
                                   ),
@@ -341,13 +338,12 @@ class _AllVideosPageState extends State<AllVideosPage> {
                                   );
                                 },
                                 subtitle: Text(
-                                  value.allVideosList[index].relativePath
-                                      .toString(),
+                                  startSong[index].relativePath.toString(),
                                   maxLines: 1,
                                   style: const TextStyle(color: Colors.white30),
                                 ),
                                 trailing: FavoriteMenuButton(
-                                    favoriteVideo: value.allVideosList[index],
+                                    favoriteVideo: startSong[index],
                                     indexKey: index)
 
                                 // InkWell(
@@ -371,7 +367,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                       : GridView.builder(
                           controller: _scrollController,
                           padding: const EdgeInsets.all(8.0),
-                          itemCount: value.allVideosList.length,
+                          itemCount: startSong.length,
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
@@ -385,7 +381,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) => VideoPLayerPage(
-                                      videoList: value.allVideosList,
+                                      videoList: startSong,
                                       initialIndex: index,
                                     ),
                                   ),
@@ -428,8 +424,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                                       child: Container(
                                         margin: const EdgeInsets.only(top: 145),
                                         child: Text(
-                                          value.allVideosList[index].title ??
-                                              'Unnamed',
+                                          startSong[index].title ?? 'Unnamed',
                                           maxLines: 1,
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
