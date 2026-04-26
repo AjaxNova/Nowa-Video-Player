@@ -1,18 +1,37 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
-import 'package:nova_videoplayer/screen/all_videos.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 class VideoDataProvider with ChangeNotifier {
   List<AssetEntity> allVideosList = [];
   List<AssetPathEntity>? allFoldersList;
+  final Map<String, Uint8List> _thumbnailCache = {};
 
-  Future<void> fetchvideos(BuildContext context) async {
+  // Get thumbnail with caching
+  Future<Uint8List?> getThumbnail(AssetEntity asset) async {
+    if (_thumbnailCache.containsKey(asset.id)) {
+      return _thumbnailCache[asset.id];
+    }
+    final data = await asset.thumbnailData;
+    if (data != null) {
+      _thumbnailCache[asset.id] = data;
+    }
+    return data;
+  }
+
+  // Clear cache if memory is low
+  void clearCache() {
+    _thumbnailCache.clear();
+    notifyListeners();
+  }
+
+  Future<void> initialize(BuildContext context) async {
     try {
-      // Check permission first - REQUEST VIDEOS ONLY
       final PermissionState ps = await PhotoManager.requestPermissionExtend(
         requestOption: const PermissionRequestOption(
           androidPermission: AndroidPermission(
-            type: RequestType.video, // Only videos
+            type: RequestType.video,
             mediaLocation: false,
           ),
         ),
@@ -27,7 +46,6 @@ class VideoDataProvider with ChangeNotifier {
           await PhotoManager.getAssetPathList(type: RequestType.video);
 
       if (albums.isEmpty) {
-        debugPrint('No video albums found');
         allVideosList = [];
         allFoldersList = [];
         notifyListeners();
@@ -38,13 +56,14 @@ class VideoDataProvider with ChangeNotifier {
       final assetCount = await recentAlbum.assetCountAsync;
 
       if (assetCount == 0) {
-        debugPrint('No videos in recent album');
         allVideosList = [];
         allFoldersList = albums;
         notifyListeners();
         return;
       }
 
+      // Still fetching all for now to keep global lists working, 
+      // but paged loading would be better for massive libraries.
       final recentAssets =
           await recentAlbum.getAssetListRange(start: 0, end: assetCount);
 
@@ -52,31 +71,18 @@ class VideoDataProvider with ChangeNotifier {
       allFoldersList = albums;
       notifyListeners();
 
-      debugPrint(
-          '✅ Loaded ${allVideosList.length} videos from ${allFoldersList?.length} folders');
-
-      // Navigate to AllVideosPage with ACTUAL data
-      Future.delayed(
-        const Duration(seconds: 1),
-        () {
-          if (context.mounted) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => AllVideosPage(
-                  assets: allVideosList, // ✅ Pass actual videos!
-                  foldersWithVideos:
-                      allFoldersList ?? [], // ✅ Pass actual folders!
-                ),
-              ),
-            );
-          }
-        },
-      );
+      debugPrint('✅ Loaded ${allVideosList.length} videos');
     } catch (e) {
-      debugPrint('Error in fetchvideos: $e');
+      debugPrint('Error in initialize: $e');
       allVideosList = [];
       allFoldersList = [];
       notifyListeners();
     }
+  }
+
+  // Deprecated: used by old screens
+  Future<void> fetchvideos(BuildContext context) async {
+    await initialize(context);
+    // Navigation should be handled by the screen, not the provider
   }
 }

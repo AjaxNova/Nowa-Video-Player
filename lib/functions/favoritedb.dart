@@ -8,12 +8,16 @@ class FavoriteDb {
   static ValueNotifier<List<AssetEntity>> favoriteVideos = ValueNotifier([]);
 
   static initialize(List<AssetEntity> videos) {
+    if (isInitialized) return;
+    favoriteVideos.value.clear();
     for (AssetEntity video in videos) {
       if (isFavor(video)) {
         favoriteVideos.value.add(video);
       }
     }
     isInitialized = true;
+    // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+    favoriteVideos.notifyListeners();
   }
 
   static isFavor(AssetEntity video) {

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
+import 'package:nova_videoplayer/provider/video_data_provider.dart';
 import 'package:nova_videoplayer/screen/home_with_bottom.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:provider/provider.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -179,61 +181,24 @@ class _SplashScreenState extends State<SplashScreen> {
         ));
   }
 
-  // Fetch videos function
+  // Fetch videos function using Provider
   Future<void> fetchvideos() async {
     setState(() => isLoading = true);
 
     try {
-      debugPrint('Starting to fetch videos...');
-
-      final albums =
-          await PhotoManager.getAssetPathList(type: RequestType.video);
-      debugPrint('Found ${albums.length} albums');
-
-      if (albums.isEmpty) {
-        setState(() {
-          isLoading = false;
-          statusMessage = "No video albums found";
-        });
-
-        // Navigate to home anyway with empty list
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) gotoHome();
-        });
-        return;
-      }
-
-      final recentAlbum = albums.first;
-      final assetCount = await recentAlbum.assetCountAsync;
-      debugPrint('Asset count: $assetCount');
-
-      if (assetCount == 0) {
-        setState(() {
-          isLoading = false;
-          statusMessage = "No videos found";
-        });
-
-        // Navigate to home anyway with empty list
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) gotoHome();
-        });
-        return;
-      }
-
-      final recentAssets =
-          await recentAlbum.getAssetListRange(start: 0, end: assetCount);
-      debugPrint('Got ${recentAssets.length} videos');
+      debugPrint('Initializing video provider...');
+      final provider = context.read<VideoDataProvider>();
+      await provider.initialize(context);
 
       setState(() {
-        allFolderswithVideos = albums;
-        allVideosList = recentAssets.toList();
+        allFolderswithVideos = provider.allFoldersList ?? [];
+        allVideosList = provider.allVideosList;
         isLoading = false;
         statusMessage = "Videos loaded!";
       });
 
-      // Process videos for add page
-      final dummyAssets = recentAssets;
-      await fetchVideosForAddVideoPage(dummyAssets: dummyAssets);
+      // Process videos for shorts/add page
+      await fetchVideosForAddVideoPage(dummyAssets: allVideosList);
 
       // Navigate to home
       Future.delayed(const Duration(milliseconds: 500), () {

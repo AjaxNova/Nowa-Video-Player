@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:nova_videoplayer/functions/gobal_functions.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:nova_videoplayer/widgets/video_thumbnail.dart';
 
-import '../functions/gobal_functions.dart';
+import 'media_kit_video_player_page.dart';
 import 'video_player_page.dart';
 
 class VideosFromFolder extends StatefulWidget {
@@ -15,12 +16,18 @@ class VideosFromFolder extends StatefulWidget {
 
 class _VideosFromFolderState extends State<VideosFromFolder> {
   List<AssetEntity> _videos = [];
+  bool _isLoading = true;
+
   void _loadVideosInFolder() async {
+    // Still fetching all for simplicity, but pagination could be added later
     List<AssetEntity> videos =
-        await widget.folder.getAssetListRange(start: 0, end: 10000);
-    setState(() {
-      _videos = videos;
-    });
+        await widget.folder.getAssetListRange(start: 0, end: 5000);
+    if (mounted) {
+      setState(() {
+        _videos = videos;
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -32,85 +39,54 @@ class _VideosFromFolderState extends State<VideosFromFolder> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
         backgroundColor: Colors.black,
-        appBar: AppBar(
-          backgroundColor: Colors.black,
-          title: Text(widget.folder.name),
-        ),
-        body: _videos.isEmpty
-            ? const Center(
-                child: CircularProgressIndicator(),
-              )
-            : ListView.builder(
-                itemCount: _videos.length,
-                itemBuilder: (context, index) {
-                  return ListTile(
-                      leading: FutureBuilder<Uint8List?>(
-                        future: _videos[index].thumbnailData,
-                        builder: (BuildContext context,
-                            AsyncSnapshot<Uint8List?> snapshot) {
-                          if (snapshot.connectionState ==
-                                  ConnectionState.done &&
-                              snapshot.data != null) {
-                            return ClipRRect(
-                              borderRadius: BorderRadius.circular(8.0),
-                              child: SizedBox(
-                                  height: 50,
-                                  width: 70,
-                                  child: Image.memory(
-                                    snapshot.data!,
-                                    fit: BoxFit.cover,
-                                  )),
-                            );
-                          } else {
-                            return ClipRRect(
-                                borderRadius: BorderRadius.circular(8.0),
-                                child: const SizedBox(
-                                    height: 50,
-                                    width: 70,
-                                    child: Icon(
-                                      Icons.movie,
-                                      color: Colors.white,
-                                    )));
-                          }
-                        },
+        elevation: 0,
+        title: Text(widget.folder.name, style: const TextStyle(color: Colors.white, fontSize: 18)),
+        iconTheme: const IconThemeData(color: Colors.white),
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : _videos.isEmpty
+              ? const Center(child: Text("No videos found", style: TextStyle(color: Colors.white)))
+              : ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: _videos.length,
+                  separatorBuilder: (context, index) => Divider(color: Colors.white.withOpacity(0.05), height: 1),
+                  itemBuilder: (context, index) {
+                    final video = _videos[index];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      leading: VideoThumbnail(asset: video),
+                      title: Text(
+                        video.title ?? 'Unnamed',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 15),
                       ),
-                      title: Container(
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: Text(
-                          _videos[index].title ?? 'Unnamed',
-                          maxLines: 1,
-                          style: const TextStyle(color: Colors.white),
-                        ),
+                      subtitle: Text(
+                        "${video.width}x${video.height} • ${durationToString(video.duration)}",
+                        style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12),
                       ),
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => VideoPLayerPage(
+                            builder: (context) => MediaKitVideoPlayerPage(
                               videoList: _videos,
                               initialIndex: index,
                             ),
                           ),
                         );
                       },
-                      subtitle: Wrap(
-                        children: [
-                          Text(
-                            durationToString(
-                              _videos[index].duration,
-                            ),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ],
+                      trailing: Icon(
+                        Icons.more_vert_rounded,
+                        color: Colors.white.withOpacity(0.6),
                       ),
-                      trailing: Container(
-                          margin: const EdgeInsets.only(bottom: 16),
-                          child: const Icon(
-                            Icons.more_vert,
-                            color: Colors.white,
-                          )));
-                },
-              ));
+                    );
+                  },
+                ),
+    );
   }
 }

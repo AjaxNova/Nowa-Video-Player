@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
+import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:nova_videoplayer/screen/video_player_page.dart';
 import 'package:photo_manager/photo_manager.dart';
 
@@ -160,7 +161,7 @@ class FavouriteScreen extends StatelessWidget {
                                                   Navigator.of(context)
                                                       .push(MaterialPageRoute(
                                                     builder: (context) =>
-                                                        VideoPLayerPage(
+                                                        MediaKitVideoPlayerPage(
                                                             videoList:
                                                                 favoriteData,
                                                             initialIndex:
