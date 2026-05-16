@@ -87,6 +87,13 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
     }
   }
 
+  void _claimPreloadedPlayer(int index) {
+    // Child has taken ownership — remove from our map so cleanup won't dispose it
+    _preloadedPlayers.remove(index);
+    _preloadedControllers.remove(index);
+    _preloadedFiles.remove(index);
+  }
+
   void _handlePipAction() {
     if (pipActionTrigger.value == 1) {
       activeShortsPlayer.value = null;
@@ -238,6 +245,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
                     preloadedPlayer: _preloadedPlayers[index],
                     preloadedController: _preloadedControllers[index],
                     preloadedFile: _preloadedFiles[index],
+                    onClaimPreload: () => _claimPreloadedPlayer(index),
                   );
                 },
               );
@@ -262,6 +270,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   final Player? preloadedPlayer;
   final VideoController? preloadedController;
   final File? preloadedFile;
+  final VoidCallback? onClaimPreload;
 
   const VideoPLayerPageForShorts({
     super.key, 
@@ -271,6 +280,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
     this.preloadedPlayer,
     this.preloadedController,
     this.preloadedFile,
+    this.onClaimPreload,
   });
 
   @override
@@ -549,6 +559,8 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         }
       } else {
         AppLogger.log("Shorts: Cache hit! Instant launch: ${widget.video.title}");
+        _ownsPlayer = true;
+        widget.onClaimPreload?.call();
       }
 
       bool shouldPlay = widget.isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
