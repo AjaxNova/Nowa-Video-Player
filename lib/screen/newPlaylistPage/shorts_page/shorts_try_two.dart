@@ -234,6 +234,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
           child: PageView.builder(
             scrollDirection: Axis.vertical,
             controller: _pageController,
+            physics: const PageScrollPhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
             itemCount: widget.shortVideos.length,
             itemBuilder: (BuildContext context, int index) {
               return VideoPLayerPageForShorts(
@@ -711,6 +712,16 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
       );
     }
 
+    final double videoAR = (widget.video.width > 0 && widget.video.height > 0)
+        ? widget.video.width / widget.video.height
+        : 9 / 16;
+    final double screenAR = MediaQuery.of(context).size.width / 
+        (MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 68.h);
+
+    // If video AR is close to screen AR (within 10%), use contain — no crop needed
+    // If it's very different, use cover — fill the screen
+    final BoxFit videoFit = (videoAR - screenAR).abs() < 0.1 ? BoxFit.contain : BoxFit.cover;
+
     return GestureDetector(
       behavior: HitTestBehavior.translucent, // Allow instant recognition during snaps
       onLongPressStart: (details) {
@@ -746,7 +757,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           children: [
             // Thumbnail — covers full screen, same as video
             if (_cachedThumbnail != null)
-              Image.memory(_cachedThumbnail!, fit: BoxFit.cover, width: double.infinity, height: double.infinity)
+              Image.memory(_cachedThumbnail!, fit: videoFit, width: double.infinity, height: double.infinity)
             else
               const SizedBox.shrink(),
 
@@ -756,7 +767,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                 controller: _videoController!,
                 controls: NoVideoControls,
                 fill: Colors.transparent,
-                fit: BoxFit.cover, // fills screen, slight crop on non-9:16 — same as YT
+                fit: videoFit, // dynamically use contain or cover
               ),
 
             // Show subtle loading indicator while initializing
