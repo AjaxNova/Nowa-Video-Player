@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -235,19 +236,15 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
             controller: _pageController,
             itemCount: widget.shortVideos.length,
             itemBuilder: (BuildContext context, int index) {
-              return ValueListenableBuilder<int>(
-                valueListenable: _currentIndexNotifier,
-                builder: (context, activeIndex, child) {
-                  return VideoPLayerPageForShorts(
-                    video: widget.shortVideos[index],
-                    isActive: activeIndex == index,
-                    onVideoEnd: _scrollToNext,
-                    preloadedPlayer: _preloadedPlayers[index],
-                    preloadedController: _preloadedControllers[index],
-                    preloadedFile: _preloadedFiles[index],
-                    onClaimPreload: () => _claimPreloadedPlayer(index),
-                  );
-                },
+              return VideoPLayerPageForShorts(
+                video: widget.shortVideos[index],
+                index: index,
+                activeIndexNotifier: _currentIndexNotifier,
+                onVideoEnd: _scrollToNext,
+                preloadedPlayer: _preloadedPlayers[index],
+                preloadedController: _preloadedControllers[index],
+                preloadedFile: _preloadedFiles[index],
+                onClaimPreload: () => _claimPreloadedPlayer(index),
               );
             },
             onPageChanged: (int pageIndex) {
@@ -265,7 +262,8 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
 
 class VideoPLayerPageForShorts extends StatefulWidget {
   final AssetEntity video;
-  final bool isActive;
+  final int index;
+  final ValueNotifier<int> activeIndexNotifier;
   final VoidCallback onVideoEnd;
   final Player? preloadedPlayer;
   final VideoController? preloadedController;
@@ -275,7 +273,8 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   const VideoPLayerPageForShorts({
     super.key, 
     required this.video, 
-    required this.isActive,
+    required this.index,
+    required this.activeIndexNotifier,
     required this.onVideoEnd,
     this.preloadedPlayer,
     this.preloadedController,
@@ -293,7 +292,6 @@ DateTime? _decoderLockAcquiredTime;
 String? _lockHolderVideoTitle;
 
 class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> with WidgetsBindingObserver {
-  static bool _decoderLock = false;
   Player? _player;
   VideoController? _videoController;
   bool loaded = false;
@@ -304,16 +302,47 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   bool _ownsPlayer = false; // Tracks if this widget created the engine natively
   Uint8List? _cachedThumbnail;
 
+  bool get _isActive => widget.activeIndexNotifier.value == widget.index;
+  bool _wasActive = false;
+  
+  // Stream Subscriptions to prevent leaks
+  StreamSubscription? _playingSub;
+  StreamSubscription? _completedSub;
+
   @override
   void initState() {
     super.initState();
+    _wasActive = _isActive;
+    widget.activeIndexNotifier.addListener(_onActiveIndexChanged);
     WidgetsBinding.instance.addObserver(this);
     _loadThumbnail();
     
     if (isLowEndDevice) {
-      if (widget.isActive) _initializeForLowEnd();
+      if (_isActive) _initializeForLowEnd();
     } else {
       _initializeForFlagship();
+    }
+  }
+
+  void _onActiveIndexChanged() {
+    final currentlyActive = _isActive;
+    if (_wasActive != currentlyActive) {
+      _wasActive = currentlyActive;
+      if (isLowEndDevice) {
+        if (currentlyActive) {
+          if (_player == null && !loaded && !hasError) {
+            _initializeForLowEnd();
+          }
+        } else {
+          _disposeVideoPlayer();
+        }
+      } else if (!isLowEndDevice) {
+        // Flagships also might need to resume if they were paused
+        if (currentlyActive && _player == null && !loaded && !hasError) {
+          _initializeForFlagship();
+        }
+      }
+      _syncPlayback();
     }
   }
 
@@ -325,21 +354,10 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   @override
   void didUpdateWidget(VideoPLayerPageForShorts oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (isLowEndDevice && widget.isActive != oldWidget.isActive) {
-      if (widget.isActive) {
-        if (_player == null && !loaded && !hasError) {
-          _initializeForLowEnd();
-        }
-      } else {
-        _disposeVideoPlayer();
-      }
-    } else if (!isLowEndDevice && widget.isActive != oldWidget.isActive) {
-      // Flagships also might need to resume if they were paused
-      if (widget.isActive && _player == null && !loaded && !hasError) {
-        _initializeForFlagship();
-      }
+    if (oldWidget.activeIndexNotifier != widget.activeIndexNotifier) {
+      oldWidget.activeIndexNotifier.removeListener(_onActiveIndexChanged);
+      widget.activeIndexNotifier.addListener(_onActiveIndexChanged);
     }
-    _syncPlayback();
   }
 
   @override
@@ -347,7 +365,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _player?.pause();
-    } else if (state == AppLifecycleState.resumed && widget.isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
+    } else if (state == AppLifecycleState.resumed && _isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
       _player?.play();
     }
   }
@@ -356,7 +374,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     if (_player != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (widget.isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
+        if (_isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
           if (!_isManuallyPaused) {
             _player!.play();
           }
@@ -375,8 +393,18 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     }
   }
 
+  void _onAutoPlayChanged() {
+    _player?.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
+  }
+
   void _disposeVideoPlayer({bool isDisposing = false}) {
     if (_player != null) {
+      _playingSub?.cancel();
+      _completedSub?.cancel();
+      isShortsTabActive.removeListener(_syncPlayback);
+      isShortsPiPMode.removeListener(_syncPlayback);
+      isShortsAutoPlay.removeListener(_onAutoPlayChanged);
+
       if (_ownsPlayer) {
         _player!.dispose();
       }
@@ -388,6 +416,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
 
   @override
   void dispose() {
+    widget.activeIndexNotifier.removeListener(_onActiveIndexChanged);
     WidgetsBinding.instance.removeObserver(this);
     _disposeVideoPlayer(isDisposing: true);
     super.dispose();
@@ -456,7 +485,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
       _videoController = VideoController(_player!);
 
       // Pass play argument directly based on active state to guarantee playback
-      bool shouldPlay = widget.isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
+      bool shouldPlay = _isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
       
       // Wrap native player opening in a hard 6-second timeout to prevent C++ thread blocks from freezing Dart
       await _player!.open(Media(file.path), play: shouldPlay).timeout(const Duration(seconds: 6));
@@ -467,21 +496,19 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
       }
       _player!.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
 
-      _player!.stream.playing.listen((playing) {
+      _playingSub = _player!.stream.playing.listen((playing) {
         if (mounted) setState(() => _isPlayingCache = playing);
       });
 
-      _player!.stream.completed.listen((completed) {
-        if (completed && isShortsAutoPlay.value && widget.isActive) {
+      _completedSub = _player!.stream.completed.listen((completed) {
+        if (completed && isShortsAutoPlay.value && _isActive) {
           widget.onVideoEnd();
         }
       });
 
       isShortsTabActive.addListener(_syncPlayback);
       isShortsPiPMode.addListener(_syncPlayback);
-      isShortsAutoPlay.addListener(() {
-        _player?.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
-      });
+      isShortsAutoPlay.addListener(_onAutoPlayChanged);
 
       _syncPlayback();
 
@@ -491,7 +518,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           hasError = false;
         });
         isShortsPiPError.value = false;
-        if (widget.isActive) {
+        if (_isActive) {
           HistoryVideos.addToHistory(widget.video);
         }
       }
@@ -563,7 +590,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         widget.onClaimPreload?.call();
       }
 
-      bool shouldPlay = widget.isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
+      bool shouldPlay = _isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
       
       if (shouldPlay) {
         _player!.play();
@@ -571,21 +598,19 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
 
       _player!.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
 
-      _player!.stream.playing.listen((playing) {
+      _playingSub = _player!.stream.playing.listen((playing) {
         if (mounted) setState(() => _isPlayingCache = playing);
       });
 
-      _player!.stream.completed.listen((completed) {
-        if (completed && isShortsAutoPlay.value && widget.isActive) {
+      _completedSub = _player!.stream.completed.listen((completed) {
+        if (completed && isShortsAutoPlay.value && _isActive) {
           widget.onVideoEnd();
         }
       });
 
       isShortsTabActive.addListener(_syncPlayback);
       isShortsPiPMode.addListener(_syncPlayback);
-      isShortsAutoPlay.addListener(() {
-        _player?.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
-      });
+      isShortsAutoPlay.addListener(_onAutoPlayChanged);
 
       _syncPlayback();
 
@@ -595,7 +620,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           hasError = false;
         });
         isShortsPiPError.value = false;
-        if (widget.isActive) {
+        if (_isActive) {
           HistoryVideos.addToHistory(widget.video);
         }
       }
@@ -689,6 +714,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     return GestureDetector(
       behavior: HitTestBehavior.translucent, // Allow instant recognition during snaps
       onLongPressStart: (details) {
+        if (_player == null) return;
         // Activate 2x speed only on the right half of the screen
         final screenWidth = MediaQuery.of(context).size.width;
         if (details.localPosition.dx > screenWidth / 2) {
@@ -697,10 +723,12 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         }
       },
       onLongPressEnd: (details) {
+        if (_player == null) return;
         _player!.setRate(1.0);
         setState(() => isTurboMode = false);
       },
       onTap: () {
+        if (_player == null) return;
         setState(() {
           if (_isPlayingCache) {
             _player!.pause();
@@ -716,37 +744,24 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Align(
-              alignment: (widget.video.width > widget.video.height) 
-                  ? Alignment.center 
-                  : Alignment.topCenter,
-              child: AspectRatio(
-                aspectRatio: widget.video.width > 0 && widget.video.height > 0
-                    ? widget.video.width / widget.video.height
-                    : 9 / 16,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Show thumbnail instantly using persistent cache to eliminate async layout popping
-                    if (_cachedThumbnail != null)
-                      Image.memory(_cachedThumbnail!, fit: BoxFit.cover)
-                    else
-                      Container(color: Colors.black),
-                    // Show video over thumbnail ALWAYS, with transparent background so thumbnail shows through
-                    if (_videoController != null)
-                      Video(
-                        controller: _videoController!, 
-                        controls: NoVideoControls, 
-                        fill: Colors.transparent, // Prevents black flash before frame 1
-                        fit: BoxFit.cover, // Matches the cover scaling of the thumbnail perfectly
-                      ),
-                    // Show subtle loading indicator while initializing
-                    if (!loaded)
-                      const Center(child: CircularProgressIndicator(color: Colors.white12)),
-                  ],
-                ),
+            // Thumbnail — covers full screen, same as video
+            if (_cachedThumbnail != null)
+              Image.memory(_cachedThumbnail!, fit: BoxFit.cover, width: double.infinity, height: double.infinity)
+            else
+              const SizedBox.shrink(),
+
+            // Video — always fills screen, crops if needed (YouTube behaviour)
+            if (_videoController != null)
+              Video(
+                controller: _videoController!,
+                controls: NoVideoControls,
+                fill: Colors.transparent,
+                fit: BoxFit.cover, // fills screen, slight crop on non-9:16 — same as YT
               ),
-            ),
+
+            // Show subtle loading indicator while initializing
+            if (!loaded)
+              const Center(child: CircularProgressIndicator(color: Colors.white12)),
             // Instagram-style 2X Speed Hint
             if (isTurboMode)
               Positioned(

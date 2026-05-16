@@ -198,118 +198,83 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class ShortsProgressBar extends StatefulWidget {
   const ShortsProgressBar({super.key});
-
   @override
   State<ShortsProgressBar> createState() => _ShortsProgressBarState();
 }
 
 class _ShortsProgressBarState extends State<ShortsProgressBar> {
   double? _dragProgress;
+  bool _isDragging = false;
 
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<bool>(
       valueListenable: isShortsScrolling,
-      builder: (context, isScrolling, child) {
+      builder: (context, isScrolling, _) {
         return AnimatedOpacity(
           opacity: isScrolling ? 0.0 : 1.0,
           duration: const Duration(milliseconds: 200),
           child: ValueListenableBuilder<Player?>(
             valueListenable: activeShortsPlayer,
-            builder: (context, player, child) {
-              if (player == null) return const SizedBox(height: 10);
-              
+            builder: (context, player, _) {
+              if (player == null) return const SizedBox(height: 2);
+
               return StreamBuilder<Duration>(
                 stream: player.stream.position,
-                builder: (context, snapshot) {
-                  final duration = player.state.duration.inMilliseconds;
-                  final position = player.state.position.inMilliseconds;
-                  
-                  // Determine regular playback progress
-                  double regularProgress = 0.0;
-                  if (duration > 0) {
-                    regularProgress = (position / duration).clamp(0.0, 1.0);
-                  }
-                  
-                  // Use dragProgress if dragging, otherwise use normal playback progress
-                  final double finalProgress = _dragProgress ?? regularProgress;
-                  final bool isDragging = _dragProgress != null;
+                builder: (context, _) {
+                  // Read directly from state — no lag
+                  final durMs = player.state.duration.inMilliseconds;
+                  final posMs = player.state.position.inMilliseconds;
+                  final playbackProgress = durMs > 0 ? (posMs / durMs).clamp(0.0, 1.0) : 0.0;
+                  final progress = _dragProgress ?? playbackProgress;
 
                   return GestureDetector(
-                    onHorizontalDragStart: (details) {
+                    behavior: HitTestBehavior.opaque,
+                    onHorizontalDragStart: (d) {
                       setState(() {
-                        _dragProgress = (details.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
+                        _isDragging = true;
+                        _dragProgress = (d.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
                       });
                     },
-                    onHorizontalDragUpdate: (details) {
+                    onHorizontalDragUpdate: (d) {
                       setState(() {
-                        _dragProgress = (details.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
+                        _dragProgress = (d.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
                       });
                     },
-                    onHorizontalDragEnd: (details) {
-                      if (_dragProgress != null) {
-                        final int seekToMs = (duration * _dragProgress!).toInt();
-                        player.seek(Duration(milliseconds: seekToMs));
-                        setState(() {
-                          _dragProgress = null;
-                        });
+                    onHorizontalDragEnd: (_) {
+                      if (_dragProgress != null && durMs > 0) {
+                        player.seek(Duration(milliseconds: (durMs * _dragProgress!).toInt()));
                       }
+                      setState(() { _isDragging = false; _dragProgress = null; });
                     },
                     onHorizontalDragCancel: () {
-                      setState(() {
-                        _dragProgress = null;
-                      });
+                      setState(() { _isDragging = false; _dragProgress = null; });
                     },
-                    onTapDown: (details) {
-                      final double seekPercent = (details.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
-                      final int seekToMs = (duration * seekPercent).toInt();
-                      player.seek(Duration(milliseconds: seekToMs));
+                    onTapDown: (d) {
+                      if (durMs > 0) {
+                        final pct = (d.localPosition.dx / MediaQuery.of(context).size.width).clamp(0.0, 1.0);
+                        player.seek(Duration(milliseconds: (durMs * pct).toInt()));
+                      }
                     },
-                    child: Container(
-                      height: 10.h,
+                    child: SizedBox(
+                      height: _isDragging ? 20 : 10, // taller hit area when dragging
                       width: double.infinity,
-                      color: Colors.transparent,
-                      child: Stack(
-                        alignment: Alignment.centerLeft,
-                        children: [
-                          Container(
-                            height: 2.h,
-                            width: double.infinity,
-                            color: Colors.white.withValues(alpha: 0.1),
-                          ),
-                          AnimatedContainer(
-                            duration: Duration(milliseconds: isDragging ? 50 : 250),
-                            curve: isDragging ? Curves.easeOutCubic : Curves.linear,
-                            width: MediaQuery.of(context).size.width * finalProgress,
-                            height: isDragging ? 3.h : 2.h,
-                            decoration: BoxDecoration(
-                              color: colorGreen,
-                              boxShadow: [
-                                BoxShadow(color: colorGreen.withValues(alpha: 0.3), blurRadius: 4),
-                              ],
-                            ),
-                          ),
-                          AnimatedPositioned(
-                            duration: Duration(milliseconds: isDragging ? 50 : 250),
-                            curve: isDragging ? Curves.easeOutCubic : Curves.linear,
-                            left: (MediaQuery.of(context).size.width * finalProgress) - (isDragging ? 6.w : 4.w),
-                            child: Container(
-                              height: isDragging ? 12.h : 8.h,
-                              width: isDragging ? 12.h : 8.h,
-                              decoration: BoxDecoration(
-                                color: colorGreen,
-                                shape: BoxShape.circle,
-                                boxShadow: [
-                                  BoxShadow(color: Colors.black26, blurRadius: 4),
-                                  BoxShadow(
-                                    color: colorGreen.withValues(alpha: isDragging ? 0.8 : 0.5), 
-                                    blurRadius: isDragging ? 12 : 8,
-                                  ),
-                                ],
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: SizedBox(
+                          height: _isDragging ? 3 : 2,
+                          child: Stack(
+                            children: [
+                              // Track
+                              Container(color: Colors.white12),
+                              // Fill — NO AnimatedContainer, zero duration = no lag
+                              FractionallySizedBox(
+                                widthFactor: progress,
+                                child: Container(color: colorGreen),
                               ),
-                            ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
                     ),
                   );
