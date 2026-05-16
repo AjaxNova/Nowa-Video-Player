@@ -102,7 +102,15 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
 
   for (final video in videos) {
     final durationSecs = video.videoDuration.inSeconds;
-    final isPortrait = video.height > video.width;
+    
+    // width/height can be 0 in MediaStore on many Android devices (Redmi, Realme etc.)
+    // If dimensions are missing, assume portrait — safer default on phones
+    final bool isPortrait;
+    if (video.width == 0 || video.height == 0) {
+      isPortrait = true; // treat unknown as portrait
+    } else {
+      isPortrait = video.height > video.width;
+    }
     
     // Check orientation preference
     if (!includeHorizontal && !isPortrait) {
