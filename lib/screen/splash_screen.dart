@@ -197,7 +197,7 @@ class _SplashScreenState extends State<SplashScreen> {
       }
 
       List<AssetEntity> myVideosData;
-      dummyAssets.sort((a, b) => a.title!.compareTo(b.title!));
+      dummyAssets.sort((a, b) => (a.title ?? '').compareTo(b.title ?? ''));
       myVideosData = dummyAssets;
 
       theAllVideosListFortheSelectionPage = myVideosData;
@@ -207,8 +207,8 @@ class _SplashScreenState extends State<SplashScreen> {
       debugPrint(
           'Processed ${theAllVideosListFortheSelectionPage.length} videos');
       debugPrint('Found ${theAllShortVideos.length} short videos');
-    } catch (e) {
-      debugPrint('Error in fetchVideosForAddVideoPage: $e');
+    } catch (e, stackTrace) {
+      AppLogger.logError('fetchVideosForAddVideoPage failed', e, stackTrace);
       theAllVideosListFortheSelectionPage = [];
       theAllShortVideos = [];
     }

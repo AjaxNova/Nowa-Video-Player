@@ -714,7 +714,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
 
     final double videoAR = (widget.video.width > 0 && widget.video.height > 0)
         ? widget.video.width / widget.video.height
-        : 9 / 16;
+        : 9.0 / 16.0;
     final double screenAR = MediaQuery.of(context).size.width / 
         (MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 68.h);
 
