@@ -9,6 +9,7 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:video_player/video_player.dart';
 
 import 'new_playlist_class.dart';
+import 'package:nova_videoplayer/functions/app_logger.dart';
 
 Color colorBlack = Colors.black;
 Color colorWhite = Colors.white;
@@ -101,8 +102,12 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
   final includeHorizontal = settingsBox.get('shortsIncludeHorizontal', defaultValue: false) as bool;
 
   for (final video in videos) {
-    final durationSecs = video.videoDuration.inSeconds;
-    
+    // duration can be 0 in MediaStore on budget Android devices (Redmi, Realme etc.)
+    // If missing, use the other duration field — or if both are 0, include it anyway
+    final int durationSecs = video.videoDuration.inSeconds > 0
+        ? video.videoDuration.inSeconds
+        : video.duration;
+
     // width/height can be 0 in MediaStore on many Android devices (Redmi, Realme etc.)
     // If dimensions are missing, assume portrait — safer default on phones
     final bool isPortrait;
@@ -117,11 +122,14 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
       continue;
     }
     
-    // Check duration preferences
-    if (durationSecs >= minDuration && durationSecs <= maxDuration) {
+    // If duration is STILL 0 after both checks, include the video anyway
+    // Better to show an unknown-length video than an empty feed
+    if (durationSecs == 0 || (durationSecs >= minDuration && durationSecs <= maxDuration)) {
       result.add(video);
     }
   }
+  
+  AppLogger.log('getShortsVideos: checking ${videos.length} videos, found ${result.length} shorts');
   result.shuffle();
   return result;
 }
