@@ -95,41 +95,50 @@ late List<AssetEntity> theAllShortVideos;
 Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
   final result = <AssetEntity>[];
 
-  // Load user settings or default values
   final settingsBox = Hive.box<dynamic>('appSettings');
   final minDuration = settingsBox.get('shortsMinDuration', defaultValue: 2.0) as double;
   final maxDuration = settingsBox.get('shortsMaxDuration', defaultValue: 180.0) as double;
   final includeHorizontal = settingsBox.get('shortsIncludeHorizontal', defaultValue: false) as bool;
 
+  int droppedOrientation = 0;
+  int droppedDuration = 0;
+
   for (final video in videos) {
-    // duration can be 0 in MediaStore on budget Android devices (Redmi, Realme etc.)
-    // If missing, use the other duration field — or if both are 0, include it anyway
     final int durationSecs = video.videoDuration.inSeconds > 0
         ? video.videoDuration.inSeconds
         : video.duration;
 
-    // width/height can be 0 in MediaStore on many Android devices (Redmi, Realme etc.)
-    // If dimensions are missing, assume portrait — safer default on phones
+    // Use orientatedWidth/Height — photo_manager applies rotation metadata
+    // so these reflect actual display dimensions, not raw sensor dimensions
+    final int displayWidth = video.orientatedWidth;
+    final int displayHeight = video.orientatedHeight;
+
     final bool isPortrait;
-    if (video.width == 0 || video.height == 0) {
-      isPortrait = true; // treat unknown as portrait
+    if (displayWidth == 0 || displayHeight == 0) {
+      isPortrait = true; // unknown — assume portrait
     } else {
-      isPortrait = video.height > video.width;
+      isPortrait = displayHeight > displayWidth;
     }
-    
-    // Check orientation preference
+
     if (!includeHorizontal && !isPortrait) {
+      droppedOrientation++;
       continue;
     }
-    
-    // If duration is STILL 0 after both checks, include the video anyway
-    // Better to show an unknown-length video than an empty feed
+
     if (durationSecs == 0 || (durationSecs >= minDuration && durationSecs <= maxDuration)) {
       result.add(video);
+    } else {
+      droppedDuration++;
     }
   }
-  
-  AppLogger.log('getShortsVideos: checking ${videos.length} videos, found ${result.length} shorts');
+
+  // Log first 3 videos raw values so we can see what MediaStore is returning
+  for (int i = 0; i < videos.length && i < 3; i++) {
+    final v = videos[i];
+    AppLogger.log('Video[$i]: w=${v.width} h=${v.height} ow=${v.orientatedWidth} oh=${v.orientatedHeight} dur=${v.videoDuration.inSeconds}s dur2=${v.duration} title=${v.title}');
+  }
+
+  AppLogger.log('getShortsVideos: ${videos.length} total, dropped $droppedOrientation orientation, dropped $droppedDuration duration, found ${result.length} shorts. includeH=$includeHorizontal min=$minDuration max=$maxDuration');
   result.shuffle();
   return result;
 }
