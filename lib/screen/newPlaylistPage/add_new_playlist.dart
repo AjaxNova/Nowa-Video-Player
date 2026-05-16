@@ -46,7 +46,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             onPressed: () {
                               String name = _playlistNameController.text.trim();
                               final newPlaylist =
-                                  Playlist(name: name, videoIds: []);
+                                  NovaPlaylist(name: name, videoIds: []);
                               final datas = PlaylistDb.playlistDb.values
                                   .map((e) => e.name.trim())
                                   .toList();
@@ -79,9 +79,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
         ],
       ),
       body: ValueListenableBuilder(
-        valueListenable: Hive.box<Playlist>('playlistDb').listenable(),
-        builder: (BuildContext ctx, Box<Playlist> playlists, Widget? child) {
-          return Hive.box<Playlist>('playlistDb').isEmpty
+        valueListenable: Hive.box<NovaPlaylist>('playlistDb').listenable(),
+        builder: (BuildContext ctx, Box<NovaPlaylist> playlists, Widget? child) {
+          return Hive.box<NovaPlaylist>('playlistDb').isEmpty
               ? Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -112,7 +112,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                         String name =
                                             _playlistNameController.text.trim();
                                         final newPlaylist =
-                                            Playlist(name: name, videoIds: []);
+                                            NovaPlaylist(name: name, videoIds: []);
                                         final datas = PlaylistDb
                                             .playlistDb.values
                                             .map((e) => e.name.trim())
@@ -215,7 +215,7 @@ TextEditingController nameController = TextEditingController();
 final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
 Future<dynamic> editPlaylistName(
-    BuildContext context, Playlist data, int index) {
+    BuildContext context, NovaPlaylist data, int index) {
   nameController = TextEditingController(text: data.name);
   return showDialog(
     context: context,
@@ -287,7 +287,7 @@ Future<dynamic> editPlaylistName(
                   if (name.isEmpty) {
                     return;
                   } else {
-                    final playlistName = Playlist(name: name, videoIds: []);
+                    final playlistName = NovaPlaylist(name: name, videoIds: data.videoIds);
                     PlaylistDb.editList(index, playlistName);
                   }
                   nameController.clear();
@@ -307,7 +307,7 @@ Future<dynamic> editPlaylistName(
 }
 
 Future<dynamic> deletePlaylist(
-    BuildContext context, Box<Playlist> musicList, int index) {
+    BuildContext context, Box<NovaPlaylist> musicList, int index) {
   return showDialog(
     context: context,
     builder: (context) {

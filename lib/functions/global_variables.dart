@@ -1,8 +1,12 @@
 // ignore_for_file: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:video_player/video_player.dart';
 
 import 'new_playlist_class.dart';
 
@@ -12,7 +16,54 @@ Color colorGreen = const Color(0xFF4FEC68);
 
 List<String> allTheFavoriteVideosList = [];
 
-ValueNotifier<List<Playlist>> playListnotifier = ValueNotifier([]);
+ValueNotifier<List<NovaPlaylist>> playListnotifier = ValueNotifier([]);
+
+// Shorts PiP State
+ValueNotifier<Player?> activeShortsPlayer = ValueNotifier(null);
+ValueNotifier<VideoController?> activeShortsVideoController = ValueNotifier(null);
+ValueNotifier<bool> isShortsScrolling = ValueNotifier(false);
+ValueNotifier<bool> isShortsTabActive = ValueNotifier(false);
+ValueNotifier<bool> isShortsAutoPlay = ValueNotifier(false);
+ValueNotifier<bool> isShortsPiPMode = ValueNotifier(false);
+ValueNotifier<bool> isShortsPiPError = ValueNotifier(false);
+
+// Main Video PiP State
+ValueNotifier<bool> isMainPiPMode = ValueNotifier(false);
+ValueNotifier<Player?> activeMainPlayer = ValueNotifier(null);
+ValueNotifier<VideoController?> activeMainVideoController = ValueNotifier(null);
+ValueNotifier<List<AssetEntity>> mainPiPVideoList = ValueNotifier([]);
+ValueNotifier<int> mainPiPVideoIndex = ValueNotifier(0);
+ValueNotifier<int> mainPipActionTrigger = ValueNotifier(0); // 1 for next, 2 for prev
+
+ValueNotifier<int> homeTabNotifier = ValueNotifier(0);
+ValueNotifier<int> pipActionTrigger = ValueNotifier(0);
+
+
+// Hardware Capability State
+bool isLowEndDevice = false;
+
+Future<void> checkHardwareCapability() async {
+  try {
+    const platform = MethodChannel('com.thenowavideoplayer.app/hardware');
+    final String ramStr = await platform.invokeMethod('getTotalRAM');
+    final int totalRamInBytes = int.parse(ramStr);
+    final double totalRamInGB = totalRamInBytes / (1024 * 1024 * 1024);
+    debugPrint("Total System RAM: ${totalRamInGB.toStringAsFixed(2)} GB");
+    // If RAM is strictly less than 4GB (e.g. 3.something), it's low end
+    if (totalRamInGB <= 4.0) {
+      isLowEndDevice = true;
+      debugPrint("Device classified as LOW END. Enforcing strict video decoder limits.");
+    } else {
+      isLowEndDevice = false;
+      debugPrint("Device classified as HIGH END. Enabling smooth video preloading.");
+    }
+  } catch (e) {
+    debugPrint("Failed to get RAM: $e");
+    // Default to strict mode if we can't tell, to be safe
+    isLowEndDevice = true;
+  }
+}
+
 // void addPlaylist(String playlistName,Playlist playlist)async {
 
 //   final playlistDB=await Hive.openBox<Playlist>('playlist_db');
@@ -40,13 +91,26 @@ late List<AssetEntity> theAllVideosListFortheSelectionPage;
 
 late List<AssetEntity> theAllShortVideos;
 
-Future<List<AssetEntity>> getLandscapeVideos(List<AssetEntity> videos) async {
+Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
   final result = <AssetEntity>[];
 
+  // Load user settings or default values
+  final settingsBox = Hive.box<dynamic>('appSettings');
+  final minDuration = settingsBox.get('shortsMinDuration', defaultValue: 2.0) as double;
+  final maxDuration = settingsBox.get('shortsMaxDuration', defaultValue: 180.0) as double;
+  final includeHorizontal = settingsBox.get('shortsIncludeHorizontal', defaultValue: false) as bool;
+
   for (final video in videos) {
-    final duration = video.videoDuration;
-    final aspectRatio = video.width / video.height;
-    if (aspectRatio > 1 && (duration < const Duration(seconds: 32))&& duration> const Duration(seconds: 4)) {
+    final durationSecs = video.videoDuration.inSeconds;
+    final isPortrait = video.height > video.width;
+    
+    // Check orientation preference
+    if (!includeHorizontal && !isPortrait) {
+      continue;
+    }
+    
+    // Check duration preferences
+    if (durationSecs >= minDuration && durationSecs <= maxDuration) {
       result.add(video);
     }
   }
@@ -62,7 +126,7 @@ Future<List<AssetEntity>> getLandscapeVideos(List<AssetEntity> videos) async {
 
 // }
 getAllPlayListFromDb() async {
-  final playlistDB = await Hive.openBox<Playlist>('playlist_db');
+  final playlistDB = await Hive.openBox<NovaPlaylist>('playlist_db');
   playListnotifier.value.clear();
   playListnotifier.value.addAll(playlistDB.values);
   playListnotifier.notifyListeners();

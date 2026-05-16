@@ -20,11 +20,13 @@ enum AspectRatioMode { fit, stretch, crop, original }
 class MediaKitVideoPlayerPage extends StatefulWidget {
   final List<AssetEntity> videoList;
   final int initialIndex;
+  final bool resumeFromPiP;
 
   const MediaKitVideoPlayerPage({
     super.key,
     required this.videoList,
     required this.initialIndex,
+    this.resumeFromPiP = false,
   });
 
   @override
@@ -33,8 +35,8 @@ class MediaKitVideoPlayerPage extends StatefulWidget {
 
 class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
   // Media Kit Player
-  late final Player _player = Player();
-  late final VideoController _videoController = VideoController(_player);
+  late Player _player;
+  late VideoController _videoController;
   
   // Stream Subscriptions
   StreamSubscription? _tracksSub;
@@ -111,10 +113,33 @@ class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
   @override
   void initState() {
     super.initState();
+    
     _currentIndex = widget.initialIndex;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _initializeBrightnessAndVolume();
-    _initializePlayer();
+
+    if (widget.resumeFromPiP && activeMainPlayer.value != null) {
+      _player = activeMainPlayer.value!;
+      _videoController = activeMainVideoController.value!;
+      _isLoaded = true;
+      _hookUpStreams();
+      _startHideControlsTimer();
+    } else {
+      _player = Player();
+      _videoController = VideoController(_player);
+      
+      // Instantly kill PiP and stop audio when launching a new full video
+      isShortsPiPMode.value = false;
+      activeShortsPlayer.value?.pause();
+      isMainPiPMode.value = false;
+      if (activeMainPlayer.value != null && activeMainPlayer.value != _player) {
+        activeMainPlayer.value?.pause();
+        activeMainPlayer.value?.dispose();
+        activeMainPlayer.value = null;
+      }
+      
+      _initializePlayer();
+    }
   }
 
   Future<void> _initializeBrightnessAndVolume() async {
@@ -131,6 +156,42 @@ class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
     VolumeController.instance.showSystemUI = false;
   }
 
+  void _hookUpStreams() {
+    _completedSub = _player.stream.completed.listen((completed) {
+      if (completed) _nextVideo();
+    });
+
+    _tracksSub = _player.stream.tracks.listen((tracks) {
+      if (!mounted) return;
+      setState(() {
+        _audioTracks = tracks.audio;
+        _subtitleTracks = tracks.subtitle;
+      });
+    });
+
+    _widthSub = _player.stream.width.listen((width) {
+      if (width != null && _player.state.height != null) {
+        final ar = width / _player.state.height!;
+        _isLandscape = ar > 1.0;
+        _updateOrientation();
+      }
+    });
+
+    _errorSub = _player.stream.error.listen((error) {
+      debugPrint("MEDIA_KIT_ERROR: $error");
+      _lastPlayerError = error;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Player Error: $error"),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    });
+  }
+
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
@@ -143,9 +204,11 @@ class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
     _widthSub?.cancel();
     _subtitlesSub?.cancel();
 
-    _player.dispose();
+    if (!isMainPiPMode.value) {
+      _player.dispose();
+    }
 
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values);
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -173,46 +236,7 @@ class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
     await _widthSub?.cancel();
     await _subtitlesSub?.cancel();
 
-    _completedSub = _player.stream.completed.listen((completed) {
-      if (completed) _nextVideo();
-    });
-
-    _tracksSub = _player.stream.tracks.listen((tracks) {
-      if (!mounted) return;
-
-      debugPrint("===== AUDIO TRACKS =====");
-      for (final t in tracks.audio) {
-        debugPrint("id=${t.id}, title=${t.title}, lang=${t.language}");
-      }
-
-      setState(() {
-        _audioTracks = tracks.audio;
-        _subtitleTracks = tracks.subtitle;
-      });
-    });
-
-    _widthSub = _player.stream.width.listen((width) {
-      if (width != null && _player.state.height != null) {
-        final ar = width / _player.state.height!;
-        _isLandscape = ar > 1.0;
-        _updateOrientation();
-      }
-    });
-
-    _errorSub = _player.stream.error.listen((error) {
-      debugPrint("MEDIA_KIT_ERROR: $error");
-      _lastPlayerError = error;
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Player Error: $error"),
-            backgroundColor: Colors.redAccent,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    });
+    _hookUpStreams();
 
     await _player.open(Media(file.path));
     // Reset to auto to prevent previous selection from leaking
@@ -1106,6 +1130,31 @@ class _MediaKitVideoPlayerPageState extends State<MediaKitVideoPlayerPage> {
                             Icon(_isLandscape ? Icons.screen_rotation_rounded : Icons.stay_current_portrait_rounded, color: Colors.white, size: 16),
                             const SizedBox(width: 6),
                             Text(_isLandscape ? "Landscape" : "Portrait", style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () {
+                        HapticFeedback.lightImpact();
+                        // Trigger PiP Mode
+                        isMainPiPMode.value = true;
+                        activeMainPlayer.value = _player;
+                        activeMainVideoController.value = _videoController;
+                        mainPiPVideoList.value = widget.videoList;
+                        mainPiPVideoIndex.value = _currentIndex;
+                        Navigator.pop(context); // Go back to Home Screen
+                      },
+                      child: _glassContainer(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        borderRadius: 10,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 6),
+                            const Text("PiP", style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500)),
                           ],
                         ),
                       ),

@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/settings/privacy_policy.dart';
 import 'package:nova_videoplayer/settings/terms_and_conditions.dart';
+import 'package:nova_videoplayer/settings/app_logs_screen.dart';
+import 'package:nova_videoplayer/settings/shorts_settings_screen.dart';
 
 import '../functions/text_class.dart';
 import 'about_screen.dart';
@@ -67,6 +69,32 @@ class SettingsScreen extends StatelessWidget {
                   child: ListSettings(
                     titleText: TextAllWidget.settingPrivacyPolicy,
                     yourIcon: Icons.privacy_tip_outlined,
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ShortsSettingsScreen(),
+                        ));
+                  },
+                  child: ListSettings(
+                    titleText: TextAllWidget.settingShorts,
+                    yourIcon: Icons.slow_motion_video_rounded,
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AppLogsScreen(),
+                        ));
+                  },
+                  child: ListSettings(
+                    titleText: TextAllWidget.settingAppLogs,
+                    yourIcon: Icons.bug_report_outlined,
                   ),
                 ),
               ],

@@ -8,7 +8,7 @@ class VideoSelectionPage extends StatefulWidget {
   const VideoSelectionPage({super.key, required this.playlist});
 
   // final List<String>selectedIds=[];
-  final Playlist playlist;
+  final NovaPlaylist playlist;
   @override
   State<VideoSelectionPage> createState() => _VideoSelectionPageState();
 }

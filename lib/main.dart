@@ -6,20 +6,27 @@ import 'package:nova_videoplayer/provider/video_data_provider.dart';
 import 'package:nova_videoplayer/screen/splash_screen.dart';
 import 'package:provider/provider.dart';
 
-import 'functions/new_playlist_class.dart' hide Playlist;
+import 'functions/new_playlist_class.dart';
+import 'functions/global_variables.dart';
 
 main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   await Hive.initFlutter();
 
-  if (!Hive.isAdapterRegistered(PlaylistAdapter().typeId)) {
-    Hive.registerAdapter(PlaylistAdapter());
+  if (!Hive.isAdapterRegistered(NovaPlaylistAdapter().typeId)) {
+    Hive.registerAdapter(NovaPlaylistAdapter());
   }
 
-  await Hive.openBox<String>('videoHistory');
-  await Hive.openBox<String>('FavoriteDB');
-  await Hive.openBox<Playlist>('playlistDb');
+  await Future.wait([
+    Hive.openBox<String>('videoHistory'),
+    Hive.openBox<String>('FavoriteDB'),
+    Hive.openBox<NovaPlaylist>('playlistDb'),
+    Hive.openBox<String>('appLogs'),
+    Hive.openBox<dynamic>('appSettings'),
+  ]);
+
+  await checkHardwareCapability();
 
   runApp(
     MultiProvider(

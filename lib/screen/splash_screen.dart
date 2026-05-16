@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/provider/video_data_provider.dart';
 import 'package:nova_videoplayer/screen/home_with_bottom.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
+import '../functions/app_logger.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -27,16 +29,13 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _initializeApp() async {
     try {
       // First, initialize database
-      setState(() => statusMessage = "Loading database...");
+      setState(() => statusMessage = "Starting...");
       await getAllPlayListFromDb();
 
-      // Small delay to show splash
-      await Future.delayed(const Duration(seconds: 1));
-
       // Request permissions
-      setState(() => statusMessage = "Requesting permissions...");
       await _requestPermissionAndFetchVideos();
-    } catch (e) {
+    } catch (e, stackTrace) {
+      AppLogger.logError('SplashScreen: Error in _initializeApp', e, stackTrace);
       debugPrint('Error in _initializeApp: $e');
       setState(() => statusMessage = "Error: $e");
     }
@@ -44,41 +43,24 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _requestPermissionAndFetchVideos() async {
     try {
-      // Request permission with videos only
       final PermissionState ps = await PhotoManager.requestPermissionExtend(
         requestOption: const PermissionRequestOption(
           androidPermission: AndroidPermission(
-            type: RequestType.video, // Only request video permission
+            type: RequestType.video,
             mediaLocation: false,
           ),
         ),
       );
 
-      debugPrint(
-          'Permission state: isAuth=${ps.isAuth}, hasAccess=${ps.hasAccess}, hasLimited=${ps.isLimited}');
-
-      if (ps.isAuth) {
-        // Full permission granted
-        debugPrint('Full permission granted');
-        setState(() => statusMessage = "Loading videos...");
-        await fetchvideos();
-      } else if (ps.isLimited) {
-        // Limited permission (some photos selected)
-        debugPrint('Limited permission granted');
-        setState(() => statusMessage = "Loading selected videos...");
+      if (ps.isAuth || ps.isLimited) {
         await fetchvideos();
       } else {
-        // Permission denied or not determined
-        debugPrint('Permission denied or not determined');
-        if (mounted) {
-          _showPermissionDeniedDialog();
-        }
+        if (mounted) _showPermissionDeniedDialog();
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      AppLogger.logError('SplashScreen: Error requesting permissions', e, stackTrace);
       debugPrint('Error requesting permissions: $e');
-      if (mounted) {
-        _showErrorDialog('Permission error: $e');
-      }
+      if (mounted) _showErrorDialog('Permission error: $e');
     }
   }
 
@@ -88,11 +70,9 @@ class _SplashScreenState extends State<SplashScreen> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey[900],
-        title: const Text('Permission Required',
-            style: TextStyle(color: Colors.white)),
+        title: const Text('Permission Required', style: TextStyle(color: Colors.white)),
         content: const Text(
-          'NOWA PLAYER needs access to your videos to work.\n\n'
-          'Please tap "Open Settings" and allow access to Videos.',
+          'NOWA PLAYER needs access to your videos to work.\n\nPlease allow access to Videos in Settings.',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -100,22 +80,12 @@ class _SplashScreenState extends State<SplashScreen> {
             onPressed: () async {
               Navigator.pop(context);
               await PhotoManager.openSetting();
-              debugPrint('Settings opened');
-              // Wait a bit for user to grant permission
               await Future.delayed(const Duration(seconds: 2));
-              // Retry permission check
               _requestPermissionAndFetchVideos();
             },
-            child: const Text('Open Settings',
-                style: TextStyle(color: Colors.blue)),
+            child: const Text('Open Settings'),
           ),
-          TextButton(
-            onPressed: () {
-              // Exit app if permission denied
-              Navigator.pop(context);
-            },
-            child: const Text('Exit', style: TextStyle(color: Colors.red)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Exit', style: TextStyle(color: Colors.red))),
         ],
       ),
     );
@@ -127,17 +97,9 @@ class _SplashScreenState extends State<SplashScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: Colors.grey[900],
         title: const Text('Error', style: TextStyle(color: Colors.white)),
-        content: Text(
-          'An error occurred: $error',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        content: Text(error, style: const TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-            },
-            child: const Text('OK', style: TextStyle(color: Colors.blue)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK')),
         ],
       ),
     );
@@ -146,73 +108,74 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Container(
-                height: MediaQuery.of(context).size.height * .30,
-                width: MediaQuery.of(context).size.width * .7,
-                decoration: const BoxDecoration(
-                    image: DecorationImage(
-                        image: AssetImage('assets/images/SplashLogo.png'),
-                        fit: BoxFit.fitWidth)),
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              height: 200.h,
+              width: 250.w,
+              decoration: const BoxDecoration(
+                image: DecorationImage(image: AssetImage('assets/images/SplashLogo.png'), fit: BoxFit.contain),
               ),
-              const SizedBox(height: 20),
-              if (isLoading)
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              const SizedBox(height: 10),
-              Text(
-                statusMessage,
-                style: const TextStyle(
-                    fontFamily: "Inter", fontSize: 14, color: Colors.white70),
-              ),
-              const SizedBox(height: 60),
-              const Text(
-                'NOWA PLAYER',
-                style: TextStyle(
-                    fontFamily: "Inter", fontSize: 18, color: Colors.white),
-              )
-            ],
-          ),
-        ));
+            ),
+            SizedBox(height: 20.h),
+            if (isLoading) const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+            SizedBox(height: 10.h),
+            Text(statusMessage, style: TextStyle(fontFamily: "Inter", fontSize: 14.sp, color: Colors.white70)),
+            SizedBox(height: 60.h),
+            Text('NOWA PLAYER', style: TextStyle(fontFamily: "Inter", fontSize: 18.sp, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
   }
 
   // Fetch videos function using Provider
   Future<void> fetchvideos() async {
-    setState(() => isLoading = true);
+    setState(() {
+      isLoading = true;
+      statusMessage = "Discovering video library...";
+    });
 
     try {
-      debugPrint('Initializing video provider...');
       final provider = context.read<VideoDataProvider>();
+      
+      // Await primary folder mapping
       await provider.initialize(context);
-
-      setState(() {
-        allFolderswithVideos = provider.allFoldersList ?? [];
-        allVideosList = provider.allVideosList;
-        isLoading = false;
-        statusMessage = "Videos loaded!";
-      });
-
-      // Process videos for shorts/add page
-      await fetchVideosForAddVideoPage(dummyAssets: allVideosList);
-
-      // Navigate to home
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) gotoHome();
-      });
-    } catch (e) {
-      debugPrint('Error fetching videos: $e');
-      setState(() {
-        isLoading = false;
-        statusMessage = "Error loading videos";
-      });
-
+      
       if (mounted) {
-        _showErrorDialog('Failed to load videos: $e');
+        setState(() {
+          allFolderswithVideos = provider.allFoldersList ?? [];
+          allVideosList = provider.allVideosList;
+          statusMessage = "Optimizing your Shorts Feed...";
+        });
+
+        // Await preparation of the global Shorts list *before* leaving the splash screen
+        await fetchVideosForAddVideoPage(dummyAssets: allVideosList);
+
+        setState(() {
+          statusMessage = "Welcome to NOWA Player!";
+          isLoading = false;
+        });
+
+        // Slight cinematic pause so the user sees the "Welcome!" message briefly
+        await Future.delayed(const Duration(milliseconds: 800));
+        
+        if (mounted) {
+          gotoHome();
+        }
+      }
+
+    } catch (e, stackTrace) {
+      AppLogger.logError('SplashScreen: Error fetching videos', e, stackTrace);
+      debugPrint('Error fetching videos: $e');
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+          statusMessage = "Error loading videos";
+        });
       }
     }
   }
@@ -239,7 +202,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
       theAllVideosListFortheSelectionPage = myVideosData;
       theAllShortVideos =
-          await getLandscapeVideos(theAllVideosListFortheSelectionPage);
+          await getShortsVideos(theAllVideosListFortheSelectionPage);
 
       debugPrint(
           'Processed ${theAllVideosListFortheSelectionPage.length} videos');

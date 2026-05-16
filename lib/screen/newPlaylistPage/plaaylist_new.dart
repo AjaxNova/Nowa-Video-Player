@@ -8,7 +8,7 @@ import 'package:nova_videoplayer/screen/video_player_page.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 class PlaylistDetailsPage extends StatefulWidget {
-  final Playlist playlist;
+  final NovaPlaylist playlist;
   final int playlistKey;
 
   const PlaylistDetailsPage(
@@ -231,8 +231,8 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
         children: [
           Expanded(
             child: ValueListenableBuilder(
-                valueListenable: Hive.box<Playlist>('playlistDb').listenable(),
-                builder: (BuildContext context, Box<Playlist> allPlaylistsz,
+                valueListenable: Hive.box<NovaPlaylist>('playlistDb').listenable(),
+                builder: (BuildContext context, Box<NovaPlaylist> allPlaylistsz,
                     Widget? child) {
                   final thePlaylist = allPlaylistsz.values
                       .toList()[widget.playlistKey]

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
 import '../provider/video_data_provider.dart';
@@ -24,52 +25,40 @@ class VideoThumbnail extends StatelessWidget {
     return Stack(
       children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
+          borderRadius: BorderRadius.circular(borderRadius.r),
           child: SizedBox(
-            height: height,
-            width: width,
-            child: Consumer<VideoDataProvider>(
-              builder: (context, provider, child) {
-                return FutureBuilder<Uint8List?>(
-                  future: provider.getThumbnail(asset),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.done &&
-                        snapshot.data != null) {
-                      return Image.memory(
-                        snapshot.data!,
-                        fit: BoxFit.cover,
-                      );
-                    }
-                    return Container(
-                      color: Colors.grey[900],
-                      child: const Center(
-                        child: Icon(
-                          Icons.movie_outlined,
-                          color: Colors.white24,
-                          size: 24,
-                        ),
-                      ),
-                    );
-                  },
+            height: height.h,
+            width: width.w,
+            child: FutureBuilder<Uint8List?>(
+              future: asset.thumbnailData,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.done && snapshot.data != null) {
+                  return Image.memory(snapshot.data!, fit: BoxFit.cover);
+                }
+                return Container(
+                  color: Colors.grey[900],
+                  child: Center(
+                    child: Icon(Icons.movie_outlined, color: Colors.white24, size: 24.sp),
+                  ),
                 );
               },
             ),
           ),
         ),
         Positioned(
-          bottom: 4,
-          right: 4,
+          bottom: 4.h,
+          right: 4.w,
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            padding: EdgeInsets.symmetric(horizontal: 4.w, vertical: 2.h),
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(4.r),
             ),
             child: Text(
               durationToString(asset.duration),
-              style: const TextStyle(
+              style: TextStyle(
                 color: Colors.white,
-                fontSize: 10,
+                fontSize: 10.sp,
                 fontWeight: FontWeight.bold,
               ),
             ),
