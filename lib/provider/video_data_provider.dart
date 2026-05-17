@@ -57,7 +57,7 @@ class VideoDataProvider with ChangeNotifier {
       }
 
       allFoldersList = albums;
-      final recentAlbum = albums.first;
+      final recentAlbum = albums.firstWhere((a) => a.isAll, orElse: () => albums.first);
       _totalCount = await recentAlbum.assetCountAsync;
       AppLogger.log("VideoDataProvider: Found ${_totalCount} videos in Recents album.");
 

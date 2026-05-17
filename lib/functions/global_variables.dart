@@ -121,7 +121,7 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
       continue;
     }
 
-    if (durationSecs == 0 || (durationSecs >= minDuration && durationSecs <= maxDuration)) {
+    if (durationSecs > 0 && durationSecs >= minDuration && durationSecs <= maxDuration) {
       result.add(video);
     }
   }

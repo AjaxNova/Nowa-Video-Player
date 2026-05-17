@@ -50,33 +50,39 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
     }
   }
 
+  Future<void> _preloadSingle(int index) async {
+    if (index < 0 || index >= widget.shortVideos.length) return;
+    if (_preloadedPlayers.containsKey(index)) return; // already done
+
+    final file = await widget.shortVideos[index].file;
+    if (!mounted) return;
+    if (file == null) return;
+    
+    final player = Player();
+    final controller = VideoController(player);
+    // open but don't play
+    await player.open(Media(file.path), play: false); 
+    
+    if (!mounted) {
+      player.dispose();
+      return;
+    }
+    
+    _preloadedPlayers[index] = player;
+    _preloadedControllers[index] = controller;
+    _preloadedFiles[index] = file;
+  }
+
   // Native Engine Preload: Initialize media_kit engines for surrounding videos
   void _preloadAdjacentVideos(int currentIndex) async {
     if (isLowEndDevice) return; // low-end: skip entirely
 
-    for (final offset in [1, -1]) {
-      final i = currentIndex + offset;
-      if (i < 0 || i >= widget.shortVideos.length) continue;
-      if (_preloadedPlayers.containsKey(i)) continue; // already done
+    // 1. Preload +1 immediately and await its completion (highest priority)
+    await _preloadSingle(currentIndex + 1);
 
-      final file = await widget.shortVideos[i].file;
-      if (!mounted) return;
-      if (file == null) continue;
-      
-      final player = Player();
-      final controller = VideoController(player);
-      // open but don't play
-      await player.open(Media(file.path), play: false); 
-      
-      if (!mounted) {
-        player.dispose();
-        return;
-      }
-      
-      _preloadedPlayers[i] = player;
-      _preloadedControllers[i] = controller;
-      _preloadedFiles[i] = file;
-    }
+    // 2. Quietly start preloading -1 in the background without awaiting it
+    // so it doesn't block the calling context or cause UI delay
+    _preloadSingle(currentIndex - 1);
     
     // Memory Management: Cleanup players outside the ±1 range
     final keysToRemove = _preloadedPlayers.keys.where((k) => (k - currentIndex).abs() > 1).toList();
