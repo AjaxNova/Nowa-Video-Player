@@ -366,8 +366,8 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       _player?.pause();
-    } else if (state == AppLifecycleState.resumed && _isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
-      _player?.play();
+    } else if (state == AppLifecycleState.resumed) {
+      _syncPlayback();
     }
   }
 
@@ -712,8 +712,8 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
       );
     }
 
-    final double videoAR = (widget.video.width > 0 && widget.video.height > 0)
-        ? widget.video.width / widget.video.height
+    final double videoAR = (widget.video.orientatedWidth > 0 && widget.video.orientatedHeight > 0)
+        ? widget.video.orientatedWidth / widget.video.orientatedHeight
         : 9.0 / 16.0;
     final double screenAR = MediaQuery.of(context).size.width / 
         (MediaQuery.of(context).size.height - MediaQuery.of(context).padding.top - 68.h);
