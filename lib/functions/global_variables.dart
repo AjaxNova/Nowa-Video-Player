@@ -100,9 +100,6 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
   final maxDuration = settingsBox.get('shortsMaxDuration', defaultValue: 180.0) as double;
   final includeHorizontal = settingsBox.get('shortsIncludeHorizontal', defaultValue: false) as bool;
 
-  int droppedOrientation = 0;
-  int droppedDuration = 0;
-
   for (final video in videos) {
     final int durationSecs = video.videoDuration.inSeconds > 0
         ? video.videoDuration.inSeconds
@@ -121,24 +118,15 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
     }
 
     if (!includeHorizontal && !isPortrait) {
-      droppedOrientation++;
       continue;
     }
 
     if (durationSecs == 0 || (durationSecs >= minDuration && durationSecs <= maxDuration)) {
       result.add(video);
-    } else {
-      droppedDuration++;
     }
   }
 
-  // Log first 3 videos raw values so we can see what MediaStore is returning
-  for (int i = 0; i < videos.length && i < 3; i++) {
-    final v = videos[i];
-    AppLogger.log('Video[$i]: w=${v.width} h=${v.height} ow=${v.orientatedWidth} oh=${v.orientatedHeight} dur=${v.videoDuration.inSeconds}s dur2=${v.duration} title=${v.title}');
-  }
-
-  AppLogger.log('getShortsVideos: ${videos.length} total, dropped $droppedOrientation orientation, dropped $droppedDuration duration, found ${result.length} shorts. includeH=$includeHorizontal min=$minDuration max=$maxDuration');
+  AppLogger.log('getShortsVideos: ${videos.length} checked, ${result.length} found');
   result.shuffle();
   return result;
 }

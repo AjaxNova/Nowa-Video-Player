@@ -8,6 +8,9 @@ class CachedThumbnailImage extends StatefulWidget {
   final int height;
   final BoxFit fit;
 
+  // Simple in-memory cache to prevent duplicate loads of same asset thumbnails
+  static final Map<String, Uint8List> _memoryCache = {};
+
   const CachedThumbnailImage({
     super.key,
     required this.asset,
@@ -39,6 +42,18 @@ class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
   }
 
   Future<void> _loadThumbnail() async {
+    final cacheKey = "${widget.asset.id}_${widget.width}_${widget.height}";
+    
+    if (CachedThumbnailImage._memoryCache.containsKey(cacheKey)) {
+      if (mounted) {
+        setState(() {
+          _thumbnailData = CachedThumbnailImage._memoryCache[cacheKey];
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -47,6 +62,9 @@ class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
       final data = await widget.asset.thumbnailDataWithSize(
         ThumbnailSize(widget.width, widget.height),
       );
+      if (data != null) {
+        CachedThumbnailImage._memoryCache[cacheKey] = data;
+      }
       if (mounted) {
         setState(() {
           _thumbnailData = data;
