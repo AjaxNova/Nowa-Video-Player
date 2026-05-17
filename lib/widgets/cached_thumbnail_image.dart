@@ -28,6 +28,9 @@ class CachedThumbnailImage extends StatefulWidget {
       } catch (_) {
         // Quietly continue on failure
       }
+      
+      // Yield to the event loop between iterations to keep the UI buttery smooth
+      await Future.delayed(Duration.zero);
     }
   }
 
@@ -45,7 +48,6 @@ class CachedThumbnailImage extends StatefulWidget {
 
 class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
   Uint8List? _thumbnailData;
-  bool _isLoading = true;
 
   @override
   void initState() {
@@ -68,15 +70,10 @@ class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
       if (mounted) {
         setState(() {
           _thumbnailData = CachedThumbnailImage._memoryCache[cacheKey];
-          _isLoading = false;
         });
       }
       return;
     }
-
-    setState(() {
-      _isLoading = true;
-    });
 
     try {
       final data = await widget.asset.thumbnailDataWithSize(
@@ -88,15 +85,10 @@ class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
       if (mounted) {
         setState(() {
           _thumbnailData = data;
-          _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      // Quietly catch and fail
     }
   }
 
