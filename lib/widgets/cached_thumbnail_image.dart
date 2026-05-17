@@ -12,16 +12,20 @@ class CachedThumbnailImage extends StatefulWidget {
   static final Map<String, Uint8List> _memoryCache = {};
 
   // Push-based pre-caching: background job to warm up the cache for the first N assets
-  static void preCacheThumbnails(List<AssetEntity> assets, {int limit = 150}) async {
+  static void preCacheThumbnails(
+    List<AssetEntity> assets, {
+    int limit = 150,
+    int size = 200,
+  }) async {
     final targetLimit = assets.length < limit ? assets.length : limit;
     for (int i = 0; i < targetLimit; i++) {
       final asset = assets[i];
-      final cacheKey = "${asset.id}_200_200"; // Warm up 200x200 cache keys
+      final cacheKey = "${asset.id}_${size}_${size}"; // Warm up cache keys matching target size
       
       if (_memoryCache.containsKey(cacheKey)) continue;
 
       try {
-        final data = await asset.thumbnailDataWithSize(const ThumbnailSize(200, 200));
+        final data = await asset.thumbnailDataWithSize(ThumbnailSize(size, size));
         if (data != null) {
           _memoryCache[cacheKey] = data;
         }

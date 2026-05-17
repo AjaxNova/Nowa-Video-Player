@@ -73,9 +73,15 @@ class VideoDataProvider with ChangeNotifier {
       notifyListeners();
 
       // Start background thumbnail pre-caching
+      final int safeLimit = switch (deviceTier) {
+        DeviceTier.lowEnd    => 30,   // ~5MB
+        DeviceTier.midRange  => 80,   // ~13MB
+        DeviceTier.flagship  => 150,  // ~24MB
+      };
+
       CachedThumbnailImage.preCacheThumbnails(
         allVideosList,
-        limit: isLowEndDevice ? 50 : 150,
+        limit: safeLimit,
       );
 
       // Start background hydration for file sizes for the whole library

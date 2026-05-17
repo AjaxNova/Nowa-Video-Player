@@ -40,7 +40,12 @@ ValueNotifier<int> pipActionTrigger = ValueNotifier(0);
 
 
 // Hardware Capability State
-bool isLowEndDevice = false;
+enum DeviceTier { lowEnd, midRange, flagship }
+DeviceTier deviceTier = DeviceTier.midRange;
+double totalRamGb = 0.0;
+
+// Alias — keeps all existing isLowEndDevice usages compiling:
+bool get isLowEndDevice => deviceTier == DeviceTier.lowEnd;
 
 Future<void> checkHardwareCapability() async {
   try {
@@ -49,18 +54,23 @@ Future<void> checkHardwareCapability() async {
     final int totalRamInBytes = int.parse(ramStr);
     final double totalRamInGB = totalRamInBytes / (1024 * 1024 * 1024);
     debugPrint("Total System RAM: ${totalRamInGB.toStringAsFixed(2)} GB");
-    // If RAM is strictly less than 4GB (e.g. 3.something), it's low end
-    if (totalRamInGB <= 3.0) {
-      isLowEndDevice = true;
+    
+    totalRamGb = totalRamInGB; // store before the check
+
+    if (totalRamInGB <= 2.0) {
+      deviceTier = DeviceTier.lowEnd;
       debugPrint("Device classified as LOW END. Enforcing strict video decoder limits.");
+    } else if (totalRamInGB <= 4.0) {
+      deviceTier = DeviceTier.midRange;
+      debugPrint("Device classified as MID RANGE. Enabling moderate background preloading.");
     } else {
-      isLowEndDevice = false;
-      debugPrint("Device classified as HIGH END. Enabling smooth video preloading.");
+      deviceTier = DeviceTier.flagship;
+      debugPrint("Device classified as FLAGSHIP. Enabling full layout preloading.");
     }
   } catch (e) {
     debugPrint("Failed to get RAM: $e");
-    // Default to strict mode if we can't tell, to be safe
-    isLowEndDevice = true;
+    // Default to strict lowEnd if we can't tell, to be safe
+    deviceTier = DeviceTier.lowEnd;
   }
 }
 
@@ -120,7 +130,7 @@ Future<List<AssetEntity>> getShortsVideos(List<AssetEntity> videos) async {
       continue;
     }
 
-    if (durationSecs > 0 && durationSecs >= minDuration && durationSecs <= maxDuration) {
+    if (durationSecs == 0 || (durationSecs >= minDuration && durationSecs <= maxDuration)) {
       result.add(video);
     }
   }

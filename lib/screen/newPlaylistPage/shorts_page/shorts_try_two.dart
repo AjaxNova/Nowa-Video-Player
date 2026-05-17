@@ -3,7 +3,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:nova_videoplayer/functions/global_variables.dart';
+import '../../../functions/global_variables.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -75,14 +75,15 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
 
   // Native Engine Preload: Initialize media_kit engines for surrounding videos
   void _preloadAdjacentVideos(int currentIndex) async {
-    if (isLowEndDevice) return; // low-end: skip entirely
+    if (deviceTier == DeviceTier.lowEnd) return; // no preloading
 
-    // 1. Preload +1 immediately and await its completion (highest priority)
-    await _preloadSingle(currentIndex + 1);
-
-    // 2. Quietly start preloading -1 in the background without awaiting it
-    // so it doesn't block the calling context or cause UI delay
-    _preloadSingle(currentIndex - 1);
+    if (deviceTier == DeviceTier.midRange) {
+      await _preloadSingle(currentIndex + 1); // next only
+    } else {
+      // flagship: both directions
+      await _preloadSingle(currentIndex + 1);
+      _preloadSingle(currentIndex - 1); // fire and forget, no await
+    }
     
     // Memory Management: Cleanup players outside the ±1 range
     final keysToRemove = _preloadedPlayers.keys.where((k) => (k - currentIndex).abs() > 1).toList();
@@ -324,31 +325,74 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     WidgetsBinding.instance.addObserver(this);
     _loadThumbnail();
     
-    if (isLowEndDevice) {
-      if (_isActive) _initializeForLowEnd();
-    } else {
-      _initializeForFlagship();
+    _initDeviceTierState();
+  }
+
+  void _initDeviceTierState() async {
+    final parentState = context.findAncestorStateOfType<_ShortsPageTryState>();
+    switch (deviceTier) {
+      case DeviceTier.lowEnd:
+        if (_isActive) _initializeForLowEnd();
+        return; // no preloading
+
+      case DeviceTier.midRange:
+        // NOTE: Do NOT parallelize with Future.wait.
+        // _initializeForFlagship() claims from _preloadedPlayers first.
+        // Running _preloadSingle concurrently creates a write/read race on that map.
+        if (_isActive) await _initializeForFlagship();
+        if (parentState != null) {
+          await parentState._preloadSingle(1); // initial page is always 0, next is always 1
+        }
+        break;
+
+      case DeviceTier.flagship:
+        if (_isActive) await _initializeForFlagship();
+        if (parentState != null) {
+          await parentState._preloadSingle(1);
+          parentState._preloadSingle(-1); // safe — index guard inside _preloadSingle handles out-of-bounds
+        }
+        break;
     }
   }
 
-  void _onActiveIndexChanged() {
+  void _onActiveIndexChanged() async {
     final currentlyActive = _isActive;
     if (_wasActive != currentlyActive) {
       _wasActive = currentlyActive;
-      if (isLowEndDevice) {
-        if (currentlyActive) {
-          if (_player == null && !loaded && !hasError) {
-            _initializeForLowEnd();
+      
+      final parentState = context.findAncestorStateOfType<_ShortsPageTryState>();
+      switch (deviceTier) {
+        case DeviceTier.lowEnd:
+          if (currentlyActive) {
+            if (_player == null && !loaded && !hasError) {
+              _initializeForLowEnd();
+            }
+          } else {
+            _disposeVideoPlayer();
           }
-        } else {
-          _disposeVideoPlayer();
-        }
-      } else if (!isLowEndDevice) {
-        // Flagships also might need to resume if they were paused
-        if (currentlyActive && _player == null && !loaded && !hasError) {
-          _initializeForFlagship();
-        }
+          break;
+
+        case DeviceTier.midRange:
+          // NOTE: Do NOT parallelize — same race condition reason as above.
+          if (currentlyActive && _player == null && !loaded && !hasError) {
+            await _initializeForFlagship();
+          }
+          if (parentState != null) {
+            await parentState._preloadSingle(widget.activeIndexNotifier.value + 1);
+          }
+          break;
+
+        case DeviceTier.flagship:
+          if (currentlyActive && _player == null && !loaded && !hasError) {
+            await _initializeForFlagship();
+          }
+          if (parentState != null) {
+            await parentState._preloadSingle(widget.activeIndexNotifier.value + 1);
+            parentState._preloadSingle(widget.activeIndexNotifier.value - 1);
+          }
+          break;
       }
+      
       _syncPlayback();
     }
   }
@@ -429,7 +473,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     super.dispose();
   }
 
-  void _initializeForLowEnd() async {
+  Future<void> _initializeForLowEnd() async {
     try {
       AppLogger.log("Shorts: Start low-end initializing video: ${widget.video.title}");
       
@@ -565,7 +609,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     }
   }
 
-  void _initializeForFlagship() async {
+  Future<void> _initializeForFlagship() async {
     try {
       AppLogger.log("Shorts: Start flagship initialization: ${widget.video.title}");
       
