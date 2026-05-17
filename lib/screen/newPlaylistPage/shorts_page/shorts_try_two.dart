@@ -253,6 +253,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
                 preloadedController: _preloadedControllers[index],
                 preloadedFile: _preloadedFiles[index],
                 onClaimPreload: () => _claimPreloadedPlayer(index),
+                onPreloadSingle: _preloadSingle,
               );
             },
             onPageChanged: (int pageIndex) {
@@ -277,6 +278,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   final VideoController? preloadedController;
   final File? preloadedFile;
   final VoidCallback? onClaimPreload;
+  final Future<void> Function(int index)? onPreloadSingle;
 
   const VideoPLayerPageForShorts({
     super.key, 
@@ -288,6 +290,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
     this.preloadedController,
     this.preloadedFile,
     this.onClaimPreload,
+    this.onPreloadSingle,
   });
 
   @override
@@ -329,7 +332,6 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   }
 
   void _initDeviceTierState() async {
-    final parentState = context.findAncestorStateOfType<_ShortsPageTryState>();
     switch (deviceTier) {
       case DeviceTier.lowEnd:
         if (_isActive) _initializeForLowEnd();
@@ -340,17 +342,13 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         // _initializeForFlagship() claims from _preloadedPlayers first.
         // Running _preloadSingle concurrently creates a write/read race on that map.
         if (_isActive) await _initializeForFlagship();
-        if (parentState != null) {
-          await parentState._preloadSingle(1); // initial page is always 0, next is always 1
-        }
+        await widget.onPreloadSingle?.call(1); // initial page is always 0, next is always 1
         break;
 
       case DeviceTier.flagship:
         if (_isActive) await _initializeForFlagship();
-        if (parentState != null) {
-          await parentState._preloadSingle(1);
-          parentState._preloadSingle(-1); // safe — index guard inside _preloadSingle handles out-of-bounds
-        }
+        await widget.onPreloadSingle?.call(1);
+        widget.onPreloadSingle?.call(-1); // safe — index guard inside _preloadSingle handles out-of-bounds
         break;
     }
   }
@@ -360,7 +358,6 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     if (_wasActive != currentlyActive) {
       _wasActive = currentlyActive;
       
-      final parentState = context.findAncestorStateOfType<_ShortsPageTryState>();
       switch (deviceTier) {
         case DeviceTier.lowEnd:
           if (currentlyActive) {
@@ -377,19 +374,15 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           if (currentlyActive && _player == null && !loaded && !hasError) {
             await _initializeForFlagship();
           }
-          if (parentState != null) {
-            await parentState._preloadSingle(widget.activeIndexNotifier.value + 1);
-          }
+          await widget.onPreloadSingle?.call(widget.activeIndexNotifier.value + 1);
           break;
 
         case DeviceTier.flagship:
           if (currentlyActive && _player == null && !loaded && !hasError) {
             await _initializeForFlagship();
           }
-          if (parentState != null) {
-            await parentState._preloadSingle(widget.activeIndexNotifier.value + 1);
-            parentState._preloadSingle(widget.activeIndexNotifier.value - 1);
-          }
+          await widget.onPreloadSingle?.call(widget.activeIndexNotifier.value + 1);
+          widget.onPreloadSingle?.call(widget.activeIndexNotifier.value - 1);
           break;
       }
       
