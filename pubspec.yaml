@@ -30,7 +30,6 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   card_swiper: ^2.0.4
-  chewie: ^1.8.5
   cupertino_icons: ^1.0.2
   device_info_plus: ^12.4.0
   flutter:
@@ -44,7 +43,6 @@ dependencies:
   photo_manager: ^3.0.0
   provider: ^6.1.2
   screen_brightness: ^2.1.7
-  video_player: ^2.9.2
   volume_controller: ^3.4.1
 
 dev_dependencies:
@@ -88,7 +86,7 @@ flutter:
   fonts:
     - family: Inter
       fonts:
-        - asset: fonts\Inter-ExtraBold.ttf
+        - asset: fonts/Inter-ExtraBold.ttf
   #       - asset: fonts/Schyler-Italic.ttf
   #         style: italic
   #   - family: Trajan Pro

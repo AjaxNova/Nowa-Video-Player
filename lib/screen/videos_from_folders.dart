@@ -4,7 +4,6 @@ import 'package:photo_manager/photo_manager.dart';
 import 'package:nova_videoplayer/widgets/video_thumbnail.dart';
 
 import 'media_kit_video_player_page.dart';
-import 'video_player_page.dart';
 
 class VideosFromFolder extends StatefulWidget {
   final AssetPathEntity folder;

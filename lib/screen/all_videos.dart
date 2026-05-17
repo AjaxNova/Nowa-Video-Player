@@ -101,7 +101,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
                 _buildHeader(context, displayVideos),
                 Expanded(
                   child: displayVideos.isEmpty 
-                      ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                      ? const Center(child: Text("No videos found", style: TextStyle(color: Colors.white, fontSize: 18)))
                       : isGridView 
                           ? _buildListView(displayVideos, provider) 
                           : _buildGridView(displayVideos, provider),

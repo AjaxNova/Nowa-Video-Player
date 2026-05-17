@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'cached_thumbnail_image.dart';
 import 'package:provider/provider.dart';
 import '../provider/video_data_provider.dart';
 import '../functions/gobal_functions.dart';
@@ -29,20 +30,7 @@ class VideoThumbnail extends StatelessWidget {
           child: SizedBox(
             height: height.h,
             width: width.w,
-            child: FutureBuilder<Uint8List?>(
-              future: asset.thumbnailData,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.done && snapshot.data != null) {
-                  return Image.memory(snapshot.data!, fit: BoxFit.cover);
-                }
-                return Container(
-                  color: Colors.grey[900],
-                  child: Center(
-                    child: Icon(Icons.movie_outlined, color: Colors.white24, size: 24.sp),
-                  ),
-                );
-              },
-            ),
+            child: CachedThumbnailImage(asset: asset, fit: BoxFit.cover),
           ),
         ),
         Positioned(

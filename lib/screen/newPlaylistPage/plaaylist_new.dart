@@ -4,8 +4,9 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/functions/new_playlist_class.dart';
 import 'package:nova_videoplayer/functions/new_playlist_db_functions.dart';
-import 'package:nova_videoplayer/screen/video_player_page.dart';
+import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:photo_manager/photo_manager.dart';
+import '../../widgets/cached_thumbnail_image.dart';
 
 class PlaylistDetailsPage extends StatefulWidget {
   final NovaPlaylist playlist;
@@ -58,35 +59,18 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                       decoration:
                           BoxDecoration(border: Border.all(color: colorWhite)),
                       child: ListTile(
-                          leading: FutureBuilder<Uint8List?>(
-                            future: _videos[index].thumbnailData,
-                            builder: (BuildContext context,
-                                AsyncSnapshot<Uint8List?> snapshot) {
-                              if (snapshot.connectionState ==
-                                      ConnectionState.done &&
-                                  snapshot.data != null) {
-                                return ClipRRect(
-                                  borderRadius: BorderRadius.circular(8.0),
-                                  child: SizedBox(
-                                      height: 40,
-                                      width: 50,
-                                      child: Image.memory(
-                                        snapshot.data!,
-                                        fit: BoxFit.cover,
-                                      )),
-                                );
-                              } else {
-                                return ClipRRect(
-                                    borderRadius: BorderRadius.circular(8.0),
-                                    child: const SizedBox(
-                                        height: 50,
-                                        width: 70,
-                                        child: Icon(
-                                          Icons.movie,
-                                          color: Colors.black,
-                                        )));
-                              }
-                            },
+                          leading: ClipRRect(
+                            borderRadius: BorderRadius.circular(8.0),
+                            child: SizedBox(
+                              height: 40,
+                              width: 50,
+                              child: CachedThumbnailImage(
+                                asset: _videos[index],
+                                width: 200,
+                                height: 200,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
                           ),
                           title: Container(
                             margin: const EdgeInsets.only(bottom: 16),
@@ -252,36 +236,18 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                             final theVideo = videoPlaylist[index];
 
                             return ListTile(
-                              leading: FutureBuilder<Uint8List?>(
-                                future: theVideo.thumbnailData,
-                                builder: (BuildContext context,
-                                    AsyncSnapshot<Uint8List?> snapshot) {
-                                  if (snapshot.connectionState ==
-                                          ConnectionState.done &&
-                                      snapshot.data != null) {
-                                    return ClipRRect(
-                                      borderRadius: BorderRadius.circular(8.0),
-                                      child: SizedBox(
-                                          height: 50,
-                                          width: 70,
-                                          child: Image.memory(
-                                            snapshot.data!,
-                                            fit: BoxFit.cover,
-                                          )),
-                                    );
-                                  } else {
-                                    return ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(8.0),
-                                        child: const SizedBox(
-                                            height: 50,
-                                            width: 70,
-                                            child: Icon(
-                                              Icons.movie,
-                                              color: Colors.white,
-                                            )));
-                                  }
-                                },
+                              leading: ClipRRect(
+                                borderRadius: BorderRadius.circular(8.0),
+                                child: SizedBox(
+                                  height: 50,
+                                  width: 70,
+                                  child: CachedThumbnailImage(
+                                    asset: theVideo,
+                                    width: 200,
+                                    height: 200,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
                               ),
                               title: Text(
                                 theVideo.title!,
@@ -305,7 +271,7 @@ class _PlaylistDetailsPageState extends State<PlaylistDetailsPage> {
                               ),
                               onTap: () {
                                 Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (context) => VideoPLayerPage(
+                                  builder: (context) => MediaKitVideoPlayerPage(
                                       videoList: theVideoList,
                                       initialIndex: index),
                                 ));

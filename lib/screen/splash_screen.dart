@@ -52,7 +52,7 @@ class _SplashScreenState extends State<SplashScreen> {
         ),
       );
 
-      if (ps.isAuth || ps.isLimited) {
+      if (ps.isAuth || ps.isLimited || ps.hasAccess) {
         await fetchvideos();
       } else {
         if (mounted) _showPermissionDeniedDialog();

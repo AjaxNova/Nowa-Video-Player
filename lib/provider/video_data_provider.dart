@@ -24,7 +24,7 @@ class VideoDataProvider with ChangeNotifier {
   Future<void> _fetchAllVideos() async {
     try {
       AppLogger.log("VideoDataProvider: Requesting video permissions...");
-      final PermissionState ps = await PhotoManager.requestPermissionExtend(
+      final PermissionState ps = await PhotoManager.getPermissionState(
         requestOption: const PermissionRequestOption(
           androidPermission: AndroidPermission(
             type: RequestType.video,

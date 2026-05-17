@@ -27,7 +27,7 @@ class _FolderPageState extends State<FolderPage> {
       backgroundColor: Colors.black,
       body: widget.foldersWithVideos.isEmpty
           ? const Center(
-              child: CircularProgressIndicator(),
+              child: Text("No videos found", style: TextStyle(color: Colors.white, fontSize: 18)),
             )
           : Padding(
               padding: const EdgeInsets.all(4.0),

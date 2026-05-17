@@ -51,7 +51,7 @@ Future<void> checkHardwareCapability() async {
     final double totalRamInGB = totalRamInBytes / (1024 * 1024 * 1024);
     debugPrint("Total System RAM: ${totalRamInGB.toStringAsFixed(2)} GB");
     // If RAM is strictly less than 4GB (e.g. 3.something), it's low end
-    if (totalRamInGB <= 4.0) {
+    if (totalRamInGB <= 3.0) {
       isLowEndDevice = true;
       debugPrint("Device classified as LOW END. Enforcing strict video decoder limits.");
     } else {
