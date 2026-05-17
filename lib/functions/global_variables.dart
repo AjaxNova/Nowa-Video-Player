@@ -6,7 +6,6 @@ import 'package:hive/hive.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:video_player/video_player.dart';
 
 import 'new_playlist_class.dart';
 import 'package:nova_videoplayer/functions/app_logger.dart';

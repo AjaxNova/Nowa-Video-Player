@@ -11,6 +11,26 @@ class CachedThumbnailImage extends StatefulWidget {
   // Simple in-memory cache to prevent duplicate loads of same asset thumbnails
   static final Map<String, Uint8List> _memoryCache = {};
 
+  // Push-based pre-caching: background job to warm up the cache for the first N assets
+  static void preCacheThumbnails(List<AssetEntity> assets, {int limit = 150}) async {
+    final targetLimit = assets.length < limit ? assets.length : limit;
+    for (int i = 0; i < targetLimit; i++) {
+      final asset = assets[i];
+      final cacheKey = "${asset.id}_200_200"; // Warm up 200x200 cache keys
+      
+      if (_memoryCache.containsKey(cacheKey)) continue;
+
+      try {
+        final data = await asset.thumbnailDataWithSize(const ThumbnailSize(200, 200));
+        if (data != null) {
+          _memoryCache[cacheKey] = data;
+        }
+      } catch (_) {
+        // Quietly continue on failure
+      }
+    }
+  }
+
   const CachedThumbnailImage({
     super.key,
     required this.asset,
@@ -89,17 +109,11 @@ class _CachedThumbnailImageState extends State<CachedThumbnailImage> {
       );
     }
     
-    // Fallback/loading state
+    // Fallback/loading state - a plain grey box feels much cleaner than a busy spinner
     return Container(
       color: Colors.grey[900],
-      child: Center(
-        child: _isLoading 
-            ? const SizedBox(
-                width: 20, 
-                height: 20, 
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white24)
-              )
-            : const Icon(Icons.movie_outlined, color: Colors.white24, size: 24),
+      child: const Center(
+        child: Icon(Icons.movie_outlined, color: Colors.white24, size: 24),
       ),
     );
   }

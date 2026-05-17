@@ -9,7 +9,6 @@ import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/fav_and_playlist_select_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/shorts_page/shorts_try_two.dart';
 import 'package:photo_manager/photo_manager.dart';
-import 'package:video_player/video_player.dart';
 import '../settings/settings_page.dart';
 
 class HomeScreen extends StatefulWidget {

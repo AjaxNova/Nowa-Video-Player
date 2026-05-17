@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../functions/app_logger.dart';
+import '../functions/global_variables.dart';
+import '../widgets/cached_thumbnail_image.dart';
 
 class VideoDataProvider with ChangeNotifier {
   List<AssetEntity> allVideosList = [];
@@ -69,6 +71,12 @@ class VideoDataProvider with ChangeNotifier {
       
       _isInitialized = true;
       notifyListeners();
+
+      // Start background thumbnail pre-caching
+      CachedThumbnailImage.preCacheThumbnails(
+        allVideosList,
+        limit: isLowEndDevice ? 50 : 150,
+      );
 
       // Start background hydration for file sizes for the whole library
       _hydrateAllMetadata();
