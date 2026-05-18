@@ -1047,6 +1047,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                 Expanded(
                   child: GestureDetector(
                     onTap: () async {
+                      final scaffoldMessenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
                       final success = await FileOperations.deleteVideo(
                         context: context,
@@ -1055,7 +1056,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                       if (success && mounted) {
                         widget.onVideoDeleted?.call(widget.video);
                       } else if (!success && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        scaffoldMessenger.showSnackBar(
                           SnackBar(
                             content: Text('Could not delete video', style: TextStyle(fontSize: 12.sp)),
                             backgroundColor: const Color(0xFF1A0505),
@@ -1649,8 +1650,11 @@ class _FolderPickerSheetState extends State<_FolderPickerSheet> {
               final name = controller.text.trim();
               if (name.isEmpty) return;
               Navigator.pop(ctx);
-              // Create under DCIM
-              final dir = Directory('/storage/emulated/0/DCIM/$name');
+              // Get base path from any existing video instead of hardcoding
+              final basePath = widget.video.relativePath != null
+                  ? '/storage/emulated/0/${widget.video.relativePath!.split('/').first}'
+                  : '/storage/emulated/0/DCIM';
+              final dir = Directory('$basePath/$name');
               await dir.create(recursive: true);
               await _loadFolders(); // refresh list
             },
