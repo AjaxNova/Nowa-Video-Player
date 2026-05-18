@@ -337,7 +337,6 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     widget.activeIndexNotifier.addListener(_onActiveIndexChanged);
     WidgetsBinding.instance.addObserver(this);
     _loadThumbnail();
-    _loadFileSizeBytes();
     
     _initDeviceTierState();
   }
@@ -356,20 +355,11 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     switch (deviceTier) {
       case DeviceTier.lowEnd:
         if (_isActive) _initializeForLowEnd();
-        return; // no preloading
+        return;
 
       case DeviceTier.midRange:
-        // NOTE: Do NOT parallelize with Future.wait.
-        // _initializeForFlagship() claims from _preloadedPlayers first.
-        // Running _preloadSingle concurrently creates a write/read race on that map.
-        if (_isActive) await _initializeForFlagship();
-        await widget.onPreloadSingle?.call(1); // initial page is always 0, next is always 1
-        break;
-
       case DeviceTier.flagship:
         if (_isActive) await _initializeForFlagship();
-        await widget.onPreloadSingle?.call(1);
-        widget.onPreloadSingle?.call(-1); // safe — index guard inside _preloadSingle handles out-of-bounds
         break;
     }
   }
@@ -391,19 +381,10 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           break;
 
         case DeviceTier.midRange:
-          // NOTE: Do NOT parallelize — same race condition reason as above.
-          if (currentlyActive && _player == null && !loaded && !hasError) {
-            await _initializeForFlagship();
-          }
-          await widget.onPreloadSingle?.call(widget.activeIndexNotifier.value + 1);
-          break;
-
         case DeviceTier.flagship:
           if (currentlyActive && _player == null && !loaded && !hasError) {
             await _initializeForFlagship();
           }
-          await widget.onPreloadSingle?.call(widget.activeIndexNotifier.value + 1);
-          widget.onPreloadSingle?.call(widget.activeIndexNotifier.value - 1);
           break;
       }
       
@@ -655,6 +636,12 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         widget.onClaimPreload?.call();
       }
 
+      // Guard here before any _player! usage
+      if (_player == null) {
+        if (mounted) setState(() => hasError = true);
+        return;
+      }
+
       bool shouldPlay = _isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
       
       if (shouldPlay) {
@@ -703,6 +690,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
 
   void _openSettingsMenu() {
     final video = widget.video;
+    if (_fileSizeBytes == null) _loadFileSizeBytes();
 
     showModalBottomSheet(
       context: context,
@@ -943,6 +931,8 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   }
 
   void _openDeleteConfirmation() {
+    if (_fileSizeBytes == null) _loadFileSizeBytes();
+
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF111111),
