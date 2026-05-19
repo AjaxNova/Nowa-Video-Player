@@ -24,6 +24,7 @@ class ShortsPageTry extends StatefulWidget {
 class _ShortsPageTryState extends State<ShortsPageTry> {
   late PageController _pageController;
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
+  bool _showDeletedOverlay = false;
 
   // Preload Caches for Flagship devices
   final Map<int, Player> _preloadedPlayers = {};
@@ -230,45 +231,118 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
         bottom: false, // Bottom is already handled by Padding
         child: Padding(
           padding: EdgeInsets.only(bottom: 68.h),
-          child: NotificationListener<ScrollNotification>(
-          onNotification: (notification) {
-            if (notification is ScrollStartNotification) {
-              isShortsScrolling.value = true;
-            } else if (notification is ScrollEndNotification) {
-              isShortsScrolling.value = false;
-            }
-            return true;
-          },
-          child: PageView.builder(
-            scrollDirection: Axis.vertical,
-            controller: _pageController,
-            physics: const PageScrollPhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
-            itemCount: widget.shortVideos.length,
-            itemBuilder: (BuildContext context, int index) {
-              return VideoPLayerPageForShorts(
-                video: widget.shortVideos[index],
-                index: index,
-                activeIndexNotifier: _currentIndexNotifier,
-                onVideoEnd: _scrollToNext,
-                preloadedPlayer: _preloadedPlayers[index],
-                preloadedController: _preloadedControllers[index],
-                preloadedFile: _preloadedFiles[index],
-                onClaimPreload: () => _claimPreloadedPlayer(index),
-                onPreloadSingle: _preloadSingle,
-                onVideoDeleted: (asset) {
-                  setState(() {
-                    widget.shortVideos.removeWhere((v) => v.id == asset.id);
-                  });
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification is ScrollStartNotification) {
+                    isShortsScrolling.value = true;
+                  } else if (notification is ScrollEndNotification) {
+                    isShortsScrolling.value = false;
+                  }
+                  return true;
                 },
-              );
-            },
-            onPageChanged: (int pageIndex) {
-              _currentIndexNotifier.value = pageIndex;
-              _prefetchFiles(pageIndex);
-              _preloadAdjacentVideos(pageIndex);
-            },
+                child: PageView.builder(
+                  scrollDirection: Axis.vertical,
+                  controller: _pageController,
+                  physics: const PageScrollPhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
+                  itemCount: widget.shortVideos.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    return VideoPLayerPageForShorts(
+                      video: widget.shortVideos[index],
+                      index: index,
+                      activeIndexNotifier: _currentIndexNotifier,
+                      onVideoEnd: _scrollToNext,
+                      preloadedPlayer: _preloadedPlayers[index],
+                      preloadedController: _preloadedControllers[index],
+                      preloadedFile: _preloadedFiles[index],
+                      onClaimPreload: () => _claimPreloadedPlayer(index),
+                      onPreloadSingle: _preloadSingle,
+                      onVideoDeleted: (asset) async {
+                        final currentIndex = _currentIndexNotifier.value;
+
+                        // Stop playback immediately
+                        activeShortsPlayer.value?.pause();
+
+                        // Show deleted overlay
+                        setState(() => _showDeletedOverlay = true);
+
+                        // Remove from list
+                        setState(() {
+                          widget.shortVideos.removeWhere((v) => v.id == asset.id);
+                        });
+
+                        // Wait for overlay to show briefly
+                        await Future.delayed(const Duration(milliseconds: 900));
+                        if (!mounted) return;
+
+                        setState(() => _showDeletedOverlay = false);
+
+                        // Edge case: list is now empty
+                        if (widget.shortVideos.isEmpty) {
+                          setState(() {});
+                          return;
+                        }
+
+                        // Edge case: deleted the last video in list — go to previous
+                        if (currentIndex >= widget.shortVideos.length) {
+                          _pageController.jumpToPage(widget.shortVideos.length - 1);
+                          return;
+                        }
+
+                        // Normal case: jump to same index (which is now the next video)
+                        _pageController.jumpToPage(currentIndex);
+                      },
+                    );
+                  },
+                  onPageChanged: (int pageIndex) {
+                    _currentIndexNotifier.value = pageIndex;
+                    _prefetchFiles(pageIndex);
+                    _preloadAdjacentVideos(pageIndex);
+                  },
+                ),
+              ),
+              // Deletion overlay — shown briefly after deleting current video
+              if (_showDeletedOverlay)
+                Positioned.fill(
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.75),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 72.w,
+                          height: 72.w,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A0505),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFF7F1F1F), width: 1),
+                          ),
+                          child: Icon(Icons.delete_rounded, color: const Color(0xFFE24B4A), size: 32.sp),
+                        ),
+                        SizedBox(height: 16.h),
+                        Text(
+                          'Video deleted',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 15.sp,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        SizedBox(height: 6.h),
+                        Text(
+                          widget.shortVideos.isEmpty
+                              ? 'No more shorts'
+                              : 'Moving to next short...',
+                          style: TextStyle(color: Colors.white30, fontSize: 11.sp),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
-        ),
         ),
       ),
     );
@@ -329,6 +403,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   StreamSubscription? _completedSub;
 
   int? _fileSizeBytes;
+
 
   @override
   void initState() {
@@ -1577,13 +1652,18 @@ class _FolderPickerSheetState extends State<_FolderPickerSheet> {
 
     setState(() => _operating = true);
 
-    // Get real path from album
-    final album = _selected!['album'] as AssetPathEntity;
-    final assets = await album.getAssetListRange(start: 0, end: 1);
-    if (assets.isEmpty) { setState(() => _operating = false); return; }
-    final sampleFile = await assets.first.file;
-    if (sampleFile == null) { setState(() => _operating = false); return; }
-    final destPath = sampleFile.parent.path;
+    // Get real path from album or fallback to localPath for newly created folders
+    final album = _selected!['album'];
+    String destPath;
+    if (album != null) {
+      final assets = await (album as AssetPathEntity).getAssetListRange(start: 0, end: 1);
+      if (assets.isEmpty) { setState(() => _operating = false); return; }
+      final sampleFile = await assets.first.file;
+      if (sampleFile == null) { setState(() => _operating = false); return; }
+      destPath = sampleFile.parent.path;
+    } else {
+      destPath = _selected!['localPath'] as String;
+    }
 
     if (!mounted) return;
 
@@ -1640,13 +1720,30 @@ class _FolderPickerSheetState extends State<_FolderPickerSheet> {
               final name = controller.text.trim();
               if (name.isEmpty) return;
               Navigator.pop(ctx);
-              // Get base path from any existing video instead of hardcoding
+
               final basePath = widget.video.relativePath != null
                   ? '/storage/emulated/0/${widget.video.relativePath!.split('/').first}'
                   : '/storage/emulated/0/DCIM';
-              final dir = Directory('$basePath/$name');
+              final dirPath = '$basePath/$name';
+              final dir = Directory(dirPath);
               await dir.create(recursive: true);
-              await _loadFolders(); // refresh list
+
+              // Immediately inject the new folder into state — don't wait for MediaStore
+              if (mounted) {
+                setState(() {
+                  final newFolder = {
+                    'name': name,
+                    'path': dirPath,
+                    'album': null,       // no MediaStore album entity yet
+                    'localPath': dirPath, // use this directly for copy/move
+                    'videoCount': 0,
+                    'totalSizeBytes': 0,
+                  };
+                  _folders.insert(0, newFolder); // show at top of list
+                  _filtered.insert(0, newFolder);
+                  _selected = newFolder; // auto-select it so user can immediately confirm
+                });
+              }
             },
             child: Text('Create', style: TextStyle(color: colorGreen, fontSize: 12.sp, fontWeight: FontWeight.w600)),
           ),
