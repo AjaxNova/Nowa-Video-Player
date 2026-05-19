@@ -21,10 +21,14 @@ class ShortsPageTry extends StatefulWidget {
   State<ShortsPageTry> createState() => _ShortsPageTryState();
 }
 
-class _ShortsPageTryState extends State<ShortsPageTry> {
+class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProviderStateMixin {
   late PageController _pageController;
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
-  bool _showDeletedOverlay = false;
+  late List<AssetEntity> _videos;
+  late AnimationController _deleteAnimController;
+  int? _deletingIndex;
+  String? _deletingTitle;
+  int? _deletingSize;
 
   // Preload Caches for Flagship devices
   final Map<int, Player> _preloadedPlayers = {};
@@ -34,6 +38,11 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
   @override
   void initState() {
     super.initState();
+    _videos = List.from(widget.shortVideos);
+    _deleteAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
     _pageController = PageController(initialPage: _currentIndexNotifier.value);
     pipActionTrigger.addListener(_handlePipAction);
     
@@ -46,17 +55,17 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
   void _prefetchFiles(int currentIndex) {
     for (final offset in [1, 2, -1]) {
       final i = currentIndex + offset;
-      if (i < 0 || i >= widget.shortVideos.length) continue;
+      if (i < 0 || i >= _videos.length) continue;
       // Trigger in background, result intentionally not awaited here
-      widget.shortVideos[i].file;
+      _videos[i].file;
     }
   }
 
   Future<void> _preloadSingle(int index) async {
-    if (index < 0 || index >= widget.shortVideos.length) return;
+    if (index < 0 || index >= _videos.length) return;
     if (_preloadedPlayers.containsKey(index)) return; // already done
 
-    final file = await widget.shortVideos[index].file;
+    final file = await _videos[index].file;
     if (!mounted) return;
     if (file == null) return;
     
@@ -121,6 +130,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
   @override
   void dispose() {
     pipActionTrigger.removeListener(_handlePipAction);
+    _deleteAnimController.dispose();
     _pageController.dispose();
     _currentIndexNotifier.dispose();
     
@@ -150,7 +160,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
 
   void _scrollToNext() {
     final currentIndex = _currentIndexNotifier.value;
-    if (currentIndex < widget.shortVideos.length - 1) {
+    if (currentIndex < _videos.length - 1) {
       if (isShortsPiPMode.value) {
         _pageController.jumpToPage(currentIndex + 1);
       } else {
@@ -164,7 +174,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.shortVideos.isEmpty) {
+    if (_videos.isEmpty) {
       return Scaffold(
         backgroundColor: Colors.black,
         body: Center(
@@ -247,53 +257,104 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
                   scrollDirection: Axis.vertical,
                   controller: _pageController,
                   physics: const PageScrollPhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
-                  itemCount: widget.shortVideos.length,
+                  itemCount: _videos.length,
                   itemBuilder: (BuildContext context, int index) {
-                    return VideoPLayerPageForShorts(
-                      video: widget.shortVideos[index],
-                      index: index,
-                      activeIndexNotifier: _currentIndexNotifier,
-                      onVideoEnd: _scrollToNext,
-                      preloadedPlayer: _preloadedPlayers[index],
-                      preloadedController: _preloadedControllers[index],
-                      preloadedFile: _preloadedFiles[index],
-                      onClaimPreload: () => _claimPreloadedPlayer(index),
-                      onPreloadSingle: _preloadSingle,
-                      onVideoDeleted: (asset) async {
-                        final currentIndex = _currentIndexNotifier.value;
+                    final isDeleting = index == _deletingIndex;
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        VideoPLayerPageForShorts(
+                          key: ValueKey(_videos[index].id),
+                          video: _videos[index],
+                          index: index,
+                          activeIndexNotifier: _currentIndexNotifier,
+                          onVideoEnd: _scrollToNext,
+                          preloadedPlayer: _preloadedPlayers[index],
+                          preloadedController: _preloadedControllers[index],
+                          preloadedFile: _preloadedFiles[index],
+                          onClaimPreload: () => _claimPreloadedPlayer(index),
+                          onPreloadSingle: _preloadSingle,
+                          onVideoDeleted: (asset) async {
+                            final currentIndex = _currentIndexNotifier.value;
 
-                        // Stop playback immediately
-                        activeShortsPlayer.value?.pause();
+                            // 1. Stop playback immediately
+                            activeShortsPlayer.value?.pause();
 
-                        // Show deleted overlay
-                        setState(() => _showDeletedOverlay = true);
+                            // Fetch asset metadata for the animation
+                            String? title = asset.title;
+                            int? size;
+                            try {
+                              final file = await asset.file;
+                              size = await file?.length();
+                            } catch (_) {}
 
-                        // Remove from list
-                        setState(() {
-                          widget.shortVideos.removeWhere((v) => v.id == asset.id);
-                        });
+                            // 2. Mark this index as deleting and play Google Files Clean animation
+                            if (mounted) {
+                              setState(() {
+                                _deletingIndex = currentIndex;
+                                _deletingTitle = title;
+                                _deletingSize = size;
+                              });
+                            }
+                            _deleteAnimController.forward();
+                            
+                            // Wait for the full animation sequence (1500ms)
+                            await Future.delayed(const Duration(milliseconds: 1500));
+                            if (!mounted) return;
 
-                        // Wait for overlay to show briefly
-                        await Future.delayed(const Duration(milliseconds: 900));
-                        if (!mounted) return;
+                            // 3. Scroll to adjacent video if possible
+                            final hasNext = currentIndex < _videos.length - 1;
+                            final hasPrev = currentIndex > 0;
 
-                        setState(() => _showDeletedOverlay = false);
+                            if (hasNext) {
+                              // Scroll down to next short
+                              await _pageController.animateToPage(
+                                currentIndex + 1,
+                                duration: const Duration(milliseconds: 600),
+                                curve: Curves.easeInOutCubic,
+                              );
+                            } else if (hasPrev) {
+                              // Scroll up to previous short
+                              await _pageController.animateToPage(
+                                currentIndex - 1,
+                                duration: const Duration(milliseconds: 600),
+                                curve: Curves.easeInOutCubic,
+                              );
+                            }
 
-                        // Edge case: list is now empty
-                        if (widget.shortVideos.isEmpty) {
-                          setState(() {});
-                          return;
-                        }
+                            // 4. Mutate list while hidden/scrolled away
+                            if (mounted) {
+                              setState(() {
+                                _videos.removeWhere((v) => v.id == asset.id);
+                                _deletingIndex = null;
+                                _deletingTitle = null;
+                                _deletingSize = null;
+                              });
+                            }
 
-                        // Edge case: deleted the last video in list — go to previous
-                        if (currentIndex >= widget.shortVideos.length) {
-                          _pageController.jumpToPage(widget.shortVideos.length - 1);
-                          return;
-                        }
+                            // 5. Instantly jump to the correct index in the new list to align state
+                            if (_videos.isEmpty) {
+                              // Scaffold will rebuild to show empty screen
+                            } else if (hasNext) {
+                              _pageController.jumpToPage(currentIndex);
+                            } else if (hasPrev) {
+                              _pageController.jumpToPage(currentIndex - 1);
+                            }
 
-                        // Normal case: jump to same index (which is now the next video)
-                        _pageController.jumpToPage(currentIndex);
-                      },
+                            // Reset animation controller instantly for the next deletion
+                            _deleteAnimController.reset();
+                          },
+                        ),
+                        if (isDeleting)
+                          IgnorePointer(
+                            child: _GoogleFilesCleanAnimation(
+                              animation: _deleteAnimController,
+                              videoTitle: _deletingTitle ?? 'Unknown',
+                              videoSize: _deletingSize,
+                              hasMoreVideos: _videos.length > 1,
+                            ),
+                          ),
+                      ],
                     );
                   },
                   onPageChanged: (int pageIndex) {
@@ -303,44 +364,6 @@ class _ShortsPageTryState extends State<ShortsPageTry> {
                   },
                 ),
               ),
-              // Deletion overlay — shown briefly after deleting current video
-              if (_showDeletedOverlay)
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black.withValues(alpha: 0.75),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Container(
-                          width: 72.w,
-                          height: 72.w,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1A0505),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFF7F1F1F), width: 1),
-                          ),
-                          child: Icon(Icons.delete_rounded, color: const Color(0xFFE24B4A), size: 32.sp),
-                        ),
-                        SizedBox(height: 16.h),
-                        Text(
-                          'Video deleted',
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: 15.sp,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        SizedBox(height: 6.h),
-                        Text(
-                          widget.shortVideos.isEmpty
-                              ? 'No more shorts'
-                              : 'Moving to next short...',
-                          style: TextStyle(color: Colors.white30, fontSize: 11.sp),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
             ],
           ),
         ),
@@ -764,6 +787,13 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   }
 
   void _openSettingsMenu() {
+    try {
+      _player?.pause();
+      setState(() {
+        _isManuallyPaused = true;
+      });
+    } catch (_) {}
+
     final video = widget.video;
     if (_fileSizeBytes == null) _loadFileSizeBytes();
 
@@ -1112,6 +1142,11 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                 Expanded(
                   child: GestureDetector(
                     onTap: () async {
+                      try {
+                        _player?.pause();
+                        _player?.stop();
+                      } catch (_) {}
+
                       final scaffoldMessenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
                       final success = await FileOperations.deleteVideo(
@@ -1749,6 +1784,240 @@ class _FolderPickerSheetState extends State<_FolderPickerSheet> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _GoogleFilesCleanAnimation extends StatelessWidget {
+  final Animation<double> animation;
+  final String videoTitle;
+  final int? videoSize;
+  final bool hasMoreVideos;
+
+  const _GoogleFilesCleanAnimation({
+    required this.animation,
+    required this.videoTitle,
+    this.videoSize,
+    required this.hasMoreVideos,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.0, 0.20, curve: Curves.easeOut)),
+    );
+
+    final scanAnimation = Tween<double>(begin: -0.2, end: 1.2).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.15, 0.55, curve: Curves.easeInOut)),
+    );
+
+    final cardScale = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.55, 0.85, curve: Curves.easeInBack)),
+    );
+
+    final cardTranslateY = Tween<double>(begin: 0.0, end: 220.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.55, 0.85, curve: Curves.easeInBack)),
+    );
+
+    final trashBounce = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 1.0, end: 1.3), weight: 50),
+      TweenSequenceItem(tween: Tween<double>(begin: 1.3, end: 1.0), weight: 50),
+    ]).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.80, 0.95, curve: Curves.easeInOut)),
+    );
+
+    final successScale = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.85, 1.0, curve: Curves.elasticOut)),
+    );
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return Opacity(
+          opacity: fadeAnimation.value,
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.92),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Trash bin (cleaning target)
+                Positioned(
+                  bottom: 140.h,
+                  child: Transform.scale(
+                    scale: trashBounce.value,
+                    child: Container(
+                      width: 76.w,
+                      height: 76.w,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E0D0D),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: const Color(0xFF5A1A1A), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFE24B4A).withValues(alpha: 0.15),
+                            blurRadius: 16.r,
+                            spreadRadius: 1.r,
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.delete_sweep_rounded,
+                        color: const Color(0xFFE24B4A),
+                        size: 32.sp,
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Sparkles / Stars when item falls into trash
+                if (animation.value > 0.8)
+                  Positioned(
+                    bottom: 160.h,
+                    child: Transform.scale(
+                      scale: successScale.value,
+                      child: Icon(
+                        Icons.auto_awesome_rounded,
+                        color: Colors.amberAccent,
+                        size: 20.sp,
+                      ),
+                    ),
+                  ),
+
+                // Deleting File Card
+                Transform.translate(
+                  offset: Offset(0, cardTranslateY.value - 40.h),
+                  child: Transform.scale(
+                    scale: cardScale.value,
+                    child: Center(
+                      child: Container(
+                        width: 210.w,
+                        padding: EdgeInsets.all(16.r),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161616),
+                          borderRadius: BorderRadius.circular(16.r),
+                          border: Border.all(color: Colors.white10, width: 0.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black54,
+                              blurRadius: 16.r,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 52.w,
+                                  height: 52.w,
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(10.r),
+                                  ),
+                                  child: Icon(
+                                    Icons.video_file_rounded,
+                                    color: const Color(0xFFE24B4A),
+                                    size: 28.sp,
+                                  ),
+                                ),
+                                SizedBox(height: 12.h),
+                                Text(
+                                  videoTitle,
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12.sp,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                if (videoSize != null) ...[
+                                  SizedBox(height: 4.h),
+                                  Text(
+                                    FileOperations.formatSize(videoSize!),
+                                    style: TextStyle(
+                                      color: Colors.white30,
+                                      fontSize: 10.sp,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+
+                            // Glowing Scanning line
+                            if (animation.value > 0.15 && animation.value < 0.55)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                top: scanAnimation.value * 110.h,
+                                child: Container(
+                                  height: 2.h,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.transparent,
+                                        const Color(0xFFE24B4A).withValues(alpha: 0.8),
+                                        Colors.transparent,
+                                      ],
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: const Color(0xFFE24B4A).withValues(alpha: 0.6),
+                                        blurRadius: 6.r,
+                                        spreadRadius: 0.5.r,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // Clean Success Title
+                if (animation.value > 0.8)
+                  Positioned(
+                    bottom: 240.h,
+                    child: FadeTransition(
+                      opacity: successScale,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Space Cleaned!',
+                            style: TextStyle(
+                              color: colorGreen,
+                              fontSize: 15.sp,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                          SizedBox(height: 4.h),
+                          Text(
+                            hasMoreVideos
+                                ? 'Moving to next short...'
+                                : 'No more shorts left',
+                            style: TextStyle(
+                              color: Colors.white24,
+                              fontSize: 10.sp,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
