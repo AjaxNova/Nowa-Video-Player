@@ -8,8 +8,8 @@ app.get('/api/feed', (req, res) => {
     const searchQuery = 'mrbeast shorts';
     console.log(`Searching for "${searchQuery}" streams...`);
 
-    // Using a direct, failproof system command string without --flat-playlist to get real streaming URLs
-    const command = `yt-dlp "ytsearch3:${searchQuery}" --dump-json --no-playlist`
+    // Using a direct command with android/ios/web_creator spoofing and node JS runtime to bypass data center IP blocks
+    const command = `yt-dlp "ytsearch3:${searchQuery}" --dump-json --no-playlist --extractor-args "youtube:player_client=android,ios,web_creator" --js-runtimes node`
     exec(command, { maxBuffer: 1024 * 1024 * 30 }, (error, stdout, stderr) => {
         if (error) {
             console.error(`Execution error: ${error.message}`);
