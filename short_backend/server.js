@@ -3,6 +3,17 @@ const { exec } = require('child_process');
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Enable CORS for testing from local browser pages
+app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Bypass-Tunnel-Reminder');
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
 app.get('/api/feed', (req, res) => {
     // Searches for the keyword topic and requests standard mp4 video outputs
     const searchQuery = 'mrbeast shorts';
