@@ -8,6 +8,9 @@
     
     <!-- Wake lock for keeping screen on during video playback -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    
+    <!-- Internet permission for network streaming and backend API calls -->
+    <uses-permission android:name="android.permission.INTERNET"/>
 
     <application
         android:label="NOWA PLAYER"
