@@ -156,12 +156,26 @@ class _SplashScreenState extends State<SplashScreen> {
         await fetchVideosForAddVideoPage(dummyAssets: allVideosList);
 
         setState(() {
+          statusMessage = "Loading YouTube Shorts Feed...";
+        });
+        
+        // Start prefetching
+        prefetchYouTubeShorts(limit: 10);
+
+        // Wait up to 4 seconds for either cache to load instantly or at least 3 videos to resolve
+        int elapsedMs = 0;
+        while (globalYouTubeShorts.value.length < 3 && elapsedMs < 4000) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          elapsedMs += 100;
+        }
+
+        setState(() {
           statusMessage = "Welcome to NOWA Player!";
           isLoading = false;
         });
 
         // Slight cinematic pause so the user sees the "Welcome!" message briefly
-        await Future.delayed(const Duration(milliseconds: 800));
+        await Future.delayed(const Duration(milliseconds: 600));
         
         if (mounted) {
           gotoHome();
