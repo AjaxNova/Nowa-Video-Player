@@ -77,8 +77,14 @@ Future<void> prefetchYouTubeShorts({
       final queryStopwatch = Stopwatch()..start();
 
       if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
-        AppLogger.log('[Shorts] Fetching uploads directly from default curated channels (@hashireeeee777, @Karikku_Fresh)...');
-        final defaultHandles = ['@hashireeeee777', '@Karikku_Fresh'];
+        AppLogger.log('[Shorts] Fetching uploads directly from default curated channels...');
+        final defaultHandles = [
+          '@hashireeeee777',
+          '@Karikku_Fresh',
+          '@TrollMalayalamOfficial',
+          '@malayalamcomedyscenes',
+          '@sujithbhaktan',
+        ];
         final List<List<yt.Video>> channelsLists = [];
 
         await Future.wait(defaultHandles.map((handle) async {
@@ -273,8 +279,8 @@ Future<void> prefetchYouTubeShorts({
       }
     }
 
-    final int alreadyPresent = append ? globalYouTubeShorts.value.length : 0;
-    final int targetNewCount = limit - alreadyPresent;
+    final int alreadyPresent = globalYouTubeShorts.value.length;
+    final int targetNewCount = append ? limit : (limit - alreadyPresent).clamp(1, limit);
     AppLogger.log('[Shorts] ${candidates.length} unprocessed candidates remain. Target to resolve: $targetNewCount (limit: $limit, alreadyPresent: $alreadyPresent)...');
 
     if (targetNewCount <= 0) return;
@@ -406,11 +412,6 @@ Future<void> prefetchYouTubeShorts({
 /// Streams related videos one-by-one into the feed as each resolves.
 /// Call this after the first batch is loaded. Fire and forget.
 Future<void> streamRelatedVideosIntoFeed(yt.Video seedVideo) async {
-  if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
-    AppLogger.log('[Shorts] Restricting related stream to curated channel uploads. Prefetching more...');
-    prefetchYouTubeShorts(limit: 10, append: true);
-    return;
-  }
 
   if (_isRelatedFeedRunning) return;
   if (_usedSeedIds.contains(seedVideo.id.value)) {

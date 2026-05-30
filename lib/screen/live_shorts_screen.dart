@@ -245,7 +245,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                     });
                     
                     // Trigger prefetch when getting close to the end
-                    if (index >= _videos.length - 2) {
+                    if (index >= _videos.length - 5) {
                       prefetchYouTubeShorts(limit: 10, append: true);
                     }
 
