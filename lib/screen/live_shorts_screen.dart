@@ -38,12 +38,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
       _videos = globalYouTubeShorts.value;
       _originalVideos = List.from(globalYouTubeShorts.value);
       _isLoading = false;
-      // Immediately start background-loading more from cached search results
-      prefetchYouTubeShorts(limit: 10, append: true).then((_) {
-        if (mounted && _videos.isNotEmpty && _videos.first['seedVideo'] != null) {
-          streamRelatedVideosIntoFeed(_videos.first['seedVideo'] as yt.Video);
-        }
-      });
+      prefetchYouTubeShorts(limit: 10, append: true);
     } else {
       _fetchShorts();
     }
@@ -73,10 +68,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
         _errorMessage = youtubeShortsError;
       });
 
-      // Immediately start streaming related videos in background
-      if (_videos.isNotEmpty && _videos.first['seedVideo'] != null) {
-        streamRelatedVideosIntoFeed(_videos.first['seedVideo'] as yt.Video);
-      }
     }
   }
 
@@ -99,10 +90,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
         _errorMessage = youtubeShortsError;
       });
 
-      // Immediately start streaming related videos in background
-      if (_videos.isNotEmpty && _videos.first['seedVideo'] != null) {
-        streamRelatedVideosIntoFeed(_videos.first['seedVideo'] as yt.Video);
-      }
     }
   }
 
@@ -125,10 +112,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
         _errorMessage = youtubeShortsError;
       });
 
-      // Immediately start streaming related videos in background
-      if (_videos.isNotEmpty && _videos.first['seedVideo'] != null) {
-        streamRelatedVideosIntoFeed(_videos.first['seedVideo'] as yt.Video);
-      }
     }
   }
 
@@ -249,10 +232,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                       prefetchYouTubeShorts(limit: 10, append: true);
                     }
 
-                    // Traditional related trigger for search results
-                    if (index > 0 && index % 3 == 0 && index < _videos.length && _videos[index]['seedVideo'] != null) {
-                      streamRelatedVideosIntoFeed(_videos[index]['seedVideo'] as yt.Video);
-                    }
+
                   },
                   itemBuilder: (context, index) {
                     return SingleShortPlayer(
@@ -667,7 +647,7 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         try {
           final manifest = await ytClient.videos.streams.getManifest(
             widget.videoData['id'],
-            ytClients: [yt.YoutubeApiClient.android],
+            ytClients: [yt.YoutubeApiClient.androidVr],
           );
           final muxed = manifest.muxed.sortByVideoQuality();
           if (muxed.isNotEmpty) {
