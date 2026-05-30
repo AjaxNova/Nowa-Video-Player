@@ -658,27 +658,54 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
 
   Future<void> _initializeVideo() async {
     try {
-      final String streamUrl = widget.videoData['stream_url'];
-      debugPrint("🤖 [Player] Opening stream URL: $streamUrl");
+      String? streamUrl = widget.videoData['stream_url'];
+      debugPrint("🤖 [Player] Initializing video ID: ${widget.videoData['id']}");
 
-      // Open the direct YouTube stream URL extracted on-device
-      await _player.open(Media(streamUrl), play: widget.isActive && isShortsTabActive.value);
-      // Loop the video automatically when it finishes playing
-      await _player.setPlaylistMode(PlaylistMode.loop);
-
-      // Listen to playing stream to update the global value for transparent/opaque search button animation
-      _playingSub = _player.stream.playing.listen((playing) {
-        if (widget.isActive && mounted) {
-          isShortsPlaying.value = playing;
+      if (streamUrl == null) {
+        debugPrint("🤖 [Player] Lazy fetching stream manifest for video: ${widget.videoData['title']}");
+        final ytClient = yt.YoutubeExplode();
+        try {
+          final manifest = await ytClient.videos.streams.getManifest(
+            widget.videoData['id'],
+            ytClients: [yt.YoutubeApiClient.android],
+          );
+          final muxed = manifest.muxed.sortByVideoQuality();
+          if (muxed.isNotEmpty) {
+            streamUrl = muxed.first.url.toString();
+            // Cache it back in global state so next time it loads instantly
+            final updated = globalYouTubeShorts.value.map((v) {
+              if (v['id'] == widget.videoData['id']) {
+                return {...v, 'stream_url': streamUrl};
+              }
+              return v;
+            }).toList();
+            globalYouTubeShorts.value = updated;
+          }
+        } catch (e) {
+          debugPrint("❌ [Player] Manifest fetch failed: $e");
+        } finally {
+          ytClient.close();
         }
-      });
+      }
 
-      if (mounted) {
-        setState(() {
-          _isPlayerReady = true;
+      if (streamUrl != null) {
+        debugPrint("🤖 [Player] Opening stream URL: $streamUrl");
+        await _player.open(Media(streamUrl), play: widget.isActive && isShortsTabActive.value);
+        await _player.setPlaylistMode(PlaylistMode.loop);
+
+        _playingSub = _player.stream.playing.listen((playing) {
+          if (widget.isActive && mounted) {
+            isShortsPlaying.value = playing;
+          }
         });
-        if (widget.isActive) {
-          _syncPlayback();
+
+        if (mounted) {
+          setState(() {
+            _isPlayerReady = true;
+          });
+          if (widget.isActive) {
+            _syncPlayback();
+          }
         }
       }
     } catch (e) {

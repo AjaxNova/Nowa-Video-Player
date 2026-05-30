@@ -35,371 +35,113 @@ int _curatedUploadsOffset = 40;
 /// - [append]: true = add to existing list, false = replace
 /// - [query]: new search query (triggers fresh YouTube search)
 /// - [force]: true = bypass loading guard (used by new searches)
+const String curatedPlaylistId = 'PLKYxHjgtNOLtpJbnlqHsN_zxsd5WMj7cc';
+
 Future<void> prefetchYouTubeShorts({
-  int limit = 5,
+  int limit = 10,
   bool append = false,
   String? query,
   bool force = false,
 }) async {
-  // For background appends, skip if already loading
-  if (isYouTubeShortsLoading && !force) {
-    AppLogger.log('[Shorts] Skipped fetch — already loading (append=$append, force=$force)');
-    return;
-  }
+  if (isYouTubeShortsLoading && !force) return;
 
-  final isNewQuery = query != null;
-
-  // If not appending and not a new query and we already have enough, skip
-  if (!append && !isNewQuery && globalYouTubeShorts.value.length >= limit) return;
-
-  // If forcing (new search), cancel any stale running fetch
   if (force) _fetchVersion++;
   final myVersion = _fetchVersion;
 
   isYouTubeShortsLoading = true;
   youtubeShortsError = null;
 
-  if (isNewQuery) {
+  if (query != null) {
     currentSearchQuery = query;
     _cachedSearchResults = [];
     _cachedSearchQuery = null;
     _lastSearchPage = null;
     _usedSeedIds.clear();
-    _curatedUploadsOffset = 40;
-    AppLogger.log('[Shorts] New search query: "$query"');
+  }
+
+  // Load from local cache instantly if list is empty and not appending
+  final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
+  if (!append && globalYouTubeShorts.value.isEmpty) {
+    final cachedList = cacheBox.get(currentSearchQuery) as List?;
+    if (cachedList != null && cachedList.isNotEmpty) {
+      globalYouTubeShorts.value = cachedList.map((v) => Map<String, dynamic>.from(v)).toList();
+      AppLogger.log('[Shorts] Loaded ${globalYouTubeShorts.value.length} cached videos instantly from Hive for query "$currentSearchQuery"');
+    }
   }
 
   final ytClient = yt.YoutubeExplode();
   try {
-    // Only search YouTube if we don't have cached results for this query
-    if (_cachedSearchQuery != currentSearchQuery || _cachedSearchResults.isEmpty) {
-      final List<yt.Video> allResults = [];
-      final queryStopwatch = Stopwatch()..start();
+    List<Map<String, dynamic>> newVideos = [];
 
-      if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
-        AppLogger.log('[Shorts] Fetching uploads directly from default curated channels...');
-        final defaultHandles = [
-          '@hashireeeee777',
-          '@Karikku_Fresh',
-          '@TrollMalayalamOfficial',
-          '@malayalamcomedyscenes',
-          '@sujithbhaktan',
-        ];
-        final List<List<yt.Video>> channelsLists = [];
-
-        await Future.wait(defaultHandles.map((handle) async {
-          final chStopwatch = Stopwatch()..start();
-          try {
-            final searchContent = await ytClient.search.searchContent(handle);
-            String? channelId;
-            for (final item in searchContent) {
-              if (item is yt.SearchChannel) {
-                channelId = item.id.value;
-                break;
-              }
-            }
-
-            if (channelId != null) {
-              final uploadsStream = ytClient.channels.getUploads(channelId);
-              // Fetch latest 40 videos from each channel to get plenty of candidate shorts
-              final videosList = await uploadsStream.take(40).toList();
-              // Filter to shorts immediately before interleaving!
-              final shortsList = videosList.where((v) => v.duration != null && v.duration!.inSeconds <= 90).toList();
-              channelsLists.add(shortsList);
-              AppLogger.log('[Shorts] Pulled ${shortsList.length} shorts candidates from channel: $handle in ${chStopwatch.elapsedMilliseconds}ms');
-            }
-          } catch (e) {
-            AppLogger.logWarning('[Shorts] Failed fetching uploads for $handle (${chStopwatch.elapsedMilliseconds}ms): $e');
-          }
-        }));
-
-        // Interleave the channels lists so we get alternating videos from each channel
-        final List<yt.Video> interleaved = [];
-        if (channelsLists.isNotEmpty) {
-          int maxLen = channelsLists.map((l) => l.length).fold(0, (max, len) => len > max ? len : max);
-          for (int i = 0; i < maxLen; i++) {
-            for (final list in channelsLists) {
-              if (i < list.length) {
-                interleaved.add(list[i]);
-              }
-            }
-          }
-        }
-        allResults.addAll(interleaved);
-      } else {
-        AppLogger.log('[Shorts] Searching YouTube for "$currentSearchQuery" (parallel queries with hashtags)...');
-        
-        // Clean query to construct hashtags (e.g. "malayalam shorts" -> "malayalam")
-        final queryClean = currentSearchQuery.toLowerCase()
-            .replaceAll('shorts', '')
-            .replaceAll('short', '')
-            .replaceAll('funny', '')
-            .replaceAll('reels', '')
-            .trim()
-            .replaceAll(' ', '');
-
-        final queries = [
-          '#${queryClean}shorts',
-          '#${queryClean}comedy shorts',
-          '#kerala$queryClean shorts',
-          '$currentSearchQuery shorts',
-        ];
-
-        await Future.wait(queries.map((q) async {
-          try {
-            final page = await ytClient.search.search(q);
-            allResults.addAll(page.whereType<yt.Video>());
-            // Store first page of first query for pagination backup
-            if (q == queries.first) {
-              _lastSearchPage = page;
-            }
-          } catch (_) {}
-        }));
-      }
-
-      queryStopwatch.stop();
-      AppLogger.log('[Shorts] Metadata candidate search completed in ${queryStopwatch.elapsedMilliseconds}ms. Found ${allResults.length} total results.');
-
-      // Check if this fetch was cancelled by a newer search
-      if (_fetchVersion != myVersion) {
-        AppLogger.logWarning('[Shorts] Fetch v$myVersion cancelled by newer search v$_fetchVersion');
-        return;
-      }
-
-      // Cache ALL video results (no duration filter yet — filter when picking)
-      _cachedSearchResults = allResults;
-      _cachedSearchQuery = currentSearchQuery;
-
-      final shortsCount = _cachedSearchResults.where((v) => v.duration != null && v.duration!.inSeconds <= 90).length;
-      AppLogger.log('[Shorts] Cached ${_cachedSearchResults.length} total videos, $shortsCount are ≤90s shorts');
-    }
-
-    // Dynamic pagination: If candidates are running low, fetch more pages from YouTube in background
-    final existingTitles = globalYouTubeShorts.value.map((v) => v['title'] as String).toSet();
-    
-    // Find matching candidates with dynamic fallback for durations (up to 90s)
-    List<yt.Video> candidates = _cachedSearchResults
-        .where((v) => v.duration != null && v.duration!.inSeconds <= 90 && !existingTitles.contains(v.title))
-        .toList();
-
-    // Infinite paging trigger: if we have few candidates left, pull more
-    if (candidates.length < 5) {
-      if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
-        AppLogger.log('[Shorts] Curated candidates low (${candidates.length} left). Pulling next uploads page from channels...');
-        _curatedUploadsOffset += 40;
-        final defaultHandles = ['@hashireeeee777', '@Karikku_Fresh'];
-        final List<List<yt.Video>> channelsLists = [];
-        
-        await Future.wait(defaultHandles.map((handle) async {
-          final chStopwatch = Stopwatch()..start();
-          try {
-            final searchContent = await ytClient.search.searchContent(handle);
-            String? channelId;
-            for (final item in searchContent) {
-              if (item is yt.SearchChannel) {
-                channelId = item.id.value;
-                break;
-              }
-            }
-            if (channelId != null) {
-              final uploadsStream = ytClient.channels.getUploads(channelId);
-              // Fetch latest _curatedUploadsOffset videos
-              final videosList = await uploadsStream.take(_curatedUploadsOffset).toList();
-              // Filter to shorts immediately
-              final shortsList = videosList.where((v) => v.duration != null && v.duration!.inSeconds <= 90).toList();
-              channelsLists.add(shortsList);
-              AppLogger.log('[Shorts] Pulled ${shortsList.length} shorts candidates from channel: $handle in ${chStopwatch.elapsedMilliseconds}ms');
-            }
-          } catch (e) {
-            AppLogger.logWarning('[Shorts] Failed fetching uploads for $handle: $e');
-          }
-        }));
-        
-        // Interleave the channels lists
-        final List<yt.Video> interleaved = [];
-        if (channelsLists.isNotEmpty) {
-          int maxLen = channelsLists.map((l) => l.length).fold(0, (max, len) => len > max ? len : max);
-          for (int i = 0; i < maxLen; i++) {
-            for (final list in channelsLists) {
-              if (i < list.length) {
-                interleaved.add(list[i]);
-              }
-            }
-          }
-        }
-        _cachedSearchResults = interleaved;
-        
-        // Re-evaluate candidates
-        candidates = _cachedSearchResults
-            .where((v) => v.duration != null && v.duration!.inSeconds <= 90 && !existingTitles.contains(v.title))
-            .toList();
-      } else if (_lastSearchPage != null) {
-        AppLogger.log('[Shorts] Candidates are low (${candidates.length} left). Fetching next page from YouTube search...');
-        try {
-          final dynamic nextPage = await _lastSearchPage!.nextPage();
-          if (nextPage != null) {
-            _lastSearchPage = nextPage;
-            final newVideos = nextPage.whereType<yt.Video>().toList();
-            _cachedSearchResults.addAll(newVideos);
-            AppLogger.log('[Shorts] Appended ${newVideos.length} new videos to cache. Cache size: ${_cachedSearchResults.length}');
-            
-            // Re-evaluate candidates
-            candidates = _cachedSearchResults
-                .where((v) => v.duration != null && v.duration!.inSeconds <= 90 && !existingTitles.contains(v.title))
-                .toList();
-          }
-        } catch (e) {
-          AppLogger.logWarning('[Shorts] Failed to fetch next page in background: $e');
-        }
-      }
-    }
-
-    // Dynamic duration fallback: If still no videos ≤60s found, relax constraint to ≤180s, then to all available videos
-    if (candidates.isEmpty) {
-      AppLogger.log('[Shorts] No strict ≤60s shorts found. Relaxing filter to ≤180s...');
-      candidates = _cachedSearchResults
-          .where((v) => v.duration != null && v.duration!.inSeconds <= 180 && !existingTitles.contains(v.title))
+    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
+      AppLogger.log('[Shorts] Loading default Malayalam curated feed from playlist: $curatedPlaylistId...');
+      final videos = await ytClient.playlists
+          .getVideos(curatedPlaylistId)
+          .take(150)
           .toList();
-      
-      if (candidates.isEmpty) {
-        AppLogger.log('[Shorts] No videos ≤180s found. Relaxing filter to any video...');
-        candidates = _cachedSearchResults
-            .where((v) => !existingTitles.contains(v.title))
-            .toList();
+
+      final existingIds = globalYouTubeShorts.value
+          .map((v) => v['id'] as String)
+          .toSet();
+
+      newVideos = videos
+          .where((v) => !existingIds.contains(v.id.value))
+          .map((v) => {
+            'id': v.id.value,
+            'title': v.title,
+            'thumbnail': v.thumbnails.mediumResUrl,
+            'duration': v.duration?.inSeconds ?? 0,
+            'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+            'stream_url': null, // lazy fetched per video
+            'seedVideo': v,
+          })
+          .toList();
+    } else {
+      AppLogger.log('[Shorts] Searching YouTube for "$currentSearchQuery"...');
+      if (_cachedSearchQuery != currentSearchQuery || _cachedSearchResults.isEmpty) {
+        final searchResults = await ytClient.search.search(currentSearchQuery);
+        _cachedSearchResults = searchResults.whereType<yt.Video>().toList();
+        _cachedSearchQuery = currentSearchQuery;
       }
+
+      final existingIds = globalYouTubeShorts.value
+          .map((v) => v['id'] as String)
+          .toSet();
+
+      newVideos = _cachedSearchResults
+          .where((v) => !existingIds.contains(v.id.value))
+          .map((v) => {
+            'id': v.id.value,
+            'title': v.title,
+            'thumbnail': v.thumbnails.mediumResUrl,
+            'duration': v.duration?.inSeconds ?? 0,
+            'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+            'stream_url': null, // lazy fetched per video
+            'seedVideo': v,
+          })
+          .toList();
     }
 
-    // Try loading cached videos instantly if list is empty and not appending
-    final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
-    if (!append && globalYouTubeShorts.value.isEmpty) {
-      final cachedList = cacheBox.get(currentSearchQuery) as List?;
-      if (cachedList != null && cachedList.isNotEmpty) {
-        globalYouTubeShorts.value = cachedList.map((v) => Map<String, dynamic>.from(v)).toList();
-        AppLogger.log('[Shorts] Loaded ${globalYouTubeShorts.value.length} cached videos instantly from Hive for query "$currentSearchQuery"');
-      }
-    }
-
-    final int alreadyPresent = globalYouTubeShorts.value.length;
-    final int targetNewCount = append ? limit : (limit - alreadyPresent).clamp(1, limit);
-    AppLogger.log('[Shorts] ${candidates.length} unprocessed candidates remain. Target to resolve: $targetNewCount (limit: $limit, alreadyPresent: $alreadyPresent)...');
-
-    if (targetNewCount <= 0) return;
-
-    final List<Map<String, dynamic>> newlyFetched = [];
-    int candidateIndex = 0;
-    final totalResolveStopwatch = Stopwatch()..start();
-
-    // Helper task to resolve a single video
-    Future<void> resolveVideo(yt.Video video) async {
-      if (_fetchVersion != myVersion) return;
-      if (newlyFetched.length >= targetNewCount) return;
-
-      final stopwatch = Stopwatch()..start();
-      final currentProcIndex = newlyFetched.length + 1;
-      try {
-        final manifest = await ytClient.videos.streams.getManifest(
-          video.id,
-          ytClients: [yt.YoutubeApiClient.android],
-        );
-        stopwatch.stop();
-
-        final muxedStreams = manifest.muxed.sortByVideoQuality();
-        if (muxedStreams.isNotEmpty) {
-          final bestStream = muxedStreams.first;
-          final publishDate = (video.publishDate ?? video.uploadDate)?.toIso8601String() ?? DateTime.now().toIso8601String();
-          final videoMap = {
-            'id': video.id.value,
-            'title': video.title,
-            'thumbnail': video.thumbnails.mediumResUrl,
-            'stream_url': bestStream.url.toString(),
-            'duration': video.duration?.inSeconds ?? 0,
-            'publish_date': publishDate,
-            'seedVideo': video, // store for next round of related
-          };
-
-          newlyFetched.add(videoMap);
-          final loggedTotalCount = (append || newlyFetched.length >= 3) 
-              ? (globalYouTubeShorts.value.length + (newlyFetched.length > 3 || append ? 1 : 3)) 
-              : 0;
-
-          AppLogger.log(
-            '[Shorts] [$currentProcIndex/$targetNewCount] Resolved successfully in ${stopwatch.elapsedMilliseconds}ms | '
-            'Channel: "${video.author}" | Title: "${video.title}" | New Feed Total: $loggedTotalCount'
-          );
-
-          // Periodical Append logic:
-          if (!append) {
-            if (newlyFetched.length == 3) {
-              globalYouTubeShorts.value = List.from(newlyFetched);
-              AppLogger.log('[Shorts] Released initial threshold of 3 videos to UI.');
-            } else if (newlyFetched.length > 3) {
-              globalYouTubeShorts.value = [...globalYouTubeShorts.value, videoMap];
-            }
-          } else {
-            globalYouTubeShorts.value = [...globalYouTubeShorts.value, videoMap];
-          }
-        } else {
-          AppLogger.logWarning('[Shorts] [$currentProcIndex/$targetNewCount] No muxed streams for "${video.title}" (took ${stopwatch.elapsedMilliseconds}ms), skipping.');
-        }
-      } catch (e) {
-        stopwatch.stop();
-        AppLogger.logWarning(
-          '[Shorts] [$currentProcIndex/$targetNewCount] ⚠️ Decryption failed for "${video.title}" '
-          'from Channel: "${video.author}" after ${stopwatch.elapsedMilliseconds}ms: $e'
-        );
-      }
-    }
-
-    for (final video in candidates) {
-      if (_fetchVersion != myVersion) break;
-      if (newlyFetched.length >= targetNewCount) break;
-      
-      await resolveVideo(video);
-      // Small safety delay between sequential requests to prevent triggering YouTube rate limit blocks
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-
-    totalResolveStopwatch.stop();
-    AppLogger.log('[Shorts] Resolved $targetNewCount streams in total time: ${totalResolveStopwatch.elapsedMilliseconds}ms');
-
-    // Final cancellation check before updating state
     if (_fetchVersion != myVersion) return;
 
-    // Save final merged feed to Hive cache box
-    if (globalYouTubeShorts.value.isNotEmpty) {
-      // Deduplicate before saving
-      final seenIds = <String>{};
-      final uniqueFeed = globalYouTubeShorts.value.where((v) {
-        final id = v['id'] as String?;
-        if (id == null) return true;
-        return seenIds.add(id);
-      }).toList();
-
-      globalYouTubeShorts.value = uniqueFeed;
-
-      // Save to Hive
-      final cacheData = uniqueFeed.map((v) {
-        // Strip out the non-serializable yt.Video object before caching
+    if (newVideos.isNotEmpty) {
+      if (append) {
+        globalYouTubeShorts.value = [...globalYouTubeShorts.value, ...newVideos];
+      } else {
+        globalYouTubeShorts.value = newVideos;
+      }
+      
+      final cacheData = globalYouTubeShorts.value.map((v) {
         final cacheMap = Map<String, dynamic>.from(v);
         cacheMap.remove('seedVideo');
         return cacheMap;
       }).toList();
-
       await cacheBox.put(currentSearchQuery, cacheData);
-      AppLogger.log('[Shorts] Saved ${cacheData.length} unique items to Hive cache box under key "$currentSearchQuery"');
-    } else if (newlyFetched.isNotEmpty) {
-      if (append) {
-        globalYouTubeShorts.value = [...globalYouTubeShorts.value, ...newlyFetched];
-      } else {
-        globalYouTubeShorts.value = newlyFetched;
-      }
-    } else if (globalYouTubeShorts.value.isEmpty) {
-      youtubeShortsError = "No shorts found for '$currentSearchQuery'. Try a different search.";
-      AppLogger.logWarning('[Shorts] No shorts found for "$currentSearchQuery"');
+      AppLogger.log('[Shorts] Saved ${cacheData.length} items to Hive cache box.');
     }
   } catch (e, stackTrace) {
     if (_fetchVersion != myVersion) return;
-    AppLogger.logError('[Shorts] Fetch error', e, stackTrace);
+    AppLogger.logError('[Shorts] Fetch failed', e, stackTrace);
     youtubeShortsError = e.toString();
   } finally {
     if (_fetchVersion == myVersion) {
