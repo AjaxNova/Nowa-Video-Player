@@ -727,6 +727,29 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
     _initializeVideo();
   }
 
+  Future<void> _captureFirstFrame() async {
+    if (_hasFirstFrame || !mounted) return;
+    Uint8List? frame;
+    int retries = 0;
+    while (frame == null && retries < 15 && mounted) {
+      try {
+        frame = await _player.screenshot();
+      } catch (e) {
+        debugPrint("🤖 [Player] Screenshot retry $retries error: $e");
+      }
+      if (frame != null) break;
+      retries++;
+      await Future.delayed(Duration(milliseconds: 100 + (retries * 50)));
+    }
+    if (frame != null && mounted && !_hasFirstFrame) {
+      setState(() {
+        _firstFrame = frame;
+        _hasFirstFrame = true;
+      });
+      debugPrint("🤖 [Player] Successfully captured first frame screenshot after $retries retries.");
+    }
+  }
+
   Future<void> _initializeVideo() async {
     try {
       String? streamUrl = widget.videoData['stream_url'];
@@ -777,16 +800,9 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         await _player.setPlaylistMode(PlaylistMode.loop);
 
         // Grab first frame as thumbnail — zero network, instant, no flicker
-        _player.stream.buffering.listen((buffering) async {
+        _player.stream.buffering.listen((buffering) {
           if (!buffering && !_hasFirstFrame && mounted) {
-            await Future.delayed(const Duration(milliseconds: 200));
-            final frame = await _player.screenshot();
-            if (frame != null && mounted) {
-              setState(() {
-                _firstFrame = frame;
-                _hasFirstFrame = true;
-              });
-            }
+            _captureFirstFrame();
           }
         });
 
@@ -794,6 +810,7 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
           // Mark as started when video actually begins playing
           if (playing && !_hasStartedPlaying && mounted) {
             setState(() => _hasStartedPlaying = true);
+            _captureFirstFrame();
           }
           if (widget.isActive && mounted) {
             isShortsPlaying.value = playing;

@@ -31,6 +31,7 @@ int _fetchVersion = 0; // Incremented on new search to cancel stale fetches
 bool _isRelatedFeedRunning = false;
 final Set<String> _usedSeedIds = {};
 int _curatedUploadsOffset = 40;
+bool _hasRunMetadataFetcherThisSession = false;
 
 /// Fetches YouTube shorts lazily.
 /// - [limit]: how many new streams to extract
@@ -228,7 +229,11 @@ Future<void> prefetchYouTubeShorts({
       isYouTubeShortsLoading = false;
     }
     ytClient.close();
-    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' && globalYouTubeShorts.value.isNotEmpty && !append) {
+    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' &&
+        globalYouTubeShorts.value.isNotEmpty &&
+        !append &&
+        !_hasRunMetadataFetcherThisSession) {
+      _hasRunMetadataFetcherThisSession = true;
       _startBackgroundMetadataFetcher();
     }
   }
