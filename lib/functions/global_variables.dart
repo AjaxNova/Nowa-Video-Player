@@ -99,9 +99,9 @@ Future<void> prefetchYouTubeShorts({
             .map((v) => {
               'id': v.id.value,
               'title': v.title,
-              'thumbnail': v.thumbnails.mediumResUrl,
+              'thumbnail': 'https://img.youtube.com/vi/${v.id.value}/hqdefault.jpg',
               'duration': v.duration?.inSeconds ?? 0,
-              'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+              'publish_date': v.uploadDate?.toIso8601String(),
               'stream_url': null, // lazy fetched per video
               'seedVideo': v,
             })
@@ -147,9 +147,9 @@ Future<void> prefetchYouTubeShorts({
                     parsedVideos.add({
                       'id': videoId,
                       'title': title,
-                    'thumbnail': 'https://img.youtube.com/vi/$videoId/hqdefault.jpg',
+                      'thumbnail': 'https://img.youtube.com/vi/$videoId/hqdefault.jpg',
                       'duration': 0,
-                      'publish_date': DateTime.now().toIso8601String(),
+                      'publish_date': null,
                       'stream_url': null,
                       'seedVideo': null,
                     });
@@ -195,7 +195,7 @@ Future<void> prefetchYouTubeShorts({
             'title': v.title,
             'thumbnail': 'https://img.youtube.com/vi/${v.id.value}/hqdefault.jpg',
             'duration': v.duration?.inSeconds ?? 0,
-            'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+            'publish_date': v.uploadDate?.toIso8601String(),
             'stream_url': null, // lazy fetched per video
             'seedVideo': v,
           })
@@ -351,10 +351,10 @@ Future<void> streamRelatedVideosIntoFeed(yt.Video seedVideo) async {
           ...globalYouTubeShorts.value,
           {
             'title': item.title,
-            'thumbnail': item.thumbnails.mediumResUrl,
+            'thumbnail': 'https://img.youtube.com/vi/${item.id.value}/hqdefault.jpg',
             'stream_url': stream.url.toString(),
             'duration': item.duration?.inSeconds ?? 0,
-            'publish_date': (item.publishDate ?? item.uploadDate)?.toIso8601String() ?? DateTime.now().toIso8601String(),
+            'publish_date': (item.publishDate ?? item.uploadDate)?.toIso8601String(),
             'seedVideo': item,
           }
         ];
