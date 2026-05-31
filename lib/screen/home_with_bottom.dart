@@ -5,7 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/screen/all_videos.dart';
 import 'package:nova_videoplayer/screen/folder_page.dart';
-import 'package:nova_videoplayer/screen/live_shorts_screen.dart';
+import 'package:nova_videoplayer/screen/live_shorts/live_shorts_screen.dart';
 import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/fav_and_playlist_select_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/shorts_page/shorts_try_two.dart';

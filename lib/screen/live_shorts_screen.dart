@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:media_kit/media_kit.dart';
@@ -36,25 +37,9 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     if (globalYouTubeShorts.value.isNotEmpty) {
       _videos = List.from(globalYouTubeShorts.value);
       _isLoading = false;
-      // Preload first 10 thumbnails immediately
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _preloadThumbnails(0, 10);
-      });
       prefetchYouTubeShorts(limit: 10, append: true);
     } else {
       _fetchShorts();
-    }
-  }
-
-  void _preloadThumbnails(int from, int count) {
-    for (int i = from; i < from + count && i < _videos.length; i++) {
-      final id = _videos[i]['id'] as String?;
-      if (id != null && context.mounted) {
-        precacheImage(
-          NetworkImage('https://img.youtube.com/vi/$id/hqdefault.jpg'),
-          context,
-        );
-      }
     }
   }
 
@@ -65,13 +50,10 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
       _videos = List.from(globalYouTubeShorts.value);
       if (_currentSort != 'Default') _applySortLocal(_currentSort);
     });
-    // Preload thumbnails around the saved index
+    // Restore scroll position after rebuild to prevent snap attack
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _preloadThumbnails(savedIndex, 10);
-        if (_pageController.hasClients) {
-          _pageController.jumpToPage(savedIndex);
-        }
+      if (mounted && _pageController.hasClients) {
+        _pageController.jumpToPage(savedIndex);
       }
     });
   }
@@ -275,8 +257,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                       _focusedIndex = index;
                     });
 
-                    // Preload next 5 thumbnails
-                    _preloadThumbnails(index + 1, 5);
 
                     // Re-seed every 3 videos
                     if (index > 0 && index % 3 == 0 && index < _videos.length) {
@@ -730,6 +710,8 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
   bool isTurboMode = false;
   StreamSubscription? _playingSub;
   StreamSubscription? _positionSub;
+  Uint8List? _firstFrame;
+  bool _hasFirstFrame = false;
 
   @override
   void initState() {
@@ -793,6 +775,20 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         debugPrint("🤖 [Player] Opening stream URL: $streamUrl");
         await _player.open(Media(streamUrl), play: widget.isActive && isShortsTabActive.value);
         await _player.setPlaylistMode(PlaylistMode.loop);
+
+        // Grab first frame as thumbnail — zero network, instant, no flicker
+        _player.stream.buffering.listen((buffering) async {
+          if (!buffering && !_hasFirstFrame && mounted) {
+            await Future.delayed(const Duration(milliseconds: 200));
+            final frame = await _player.screenshot();
+            if (frame != null && mounted) {
+              setState(() {
+                _firstFrame = frame;
+                _hasFirstFrame = true;
+              });
+            }
+          }
+        });
 
         _playingSub = _player.stream.playing.listen((playing) {
           // Mark as started when video actually begins playing
@@ -931,26 +927,25 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                   // Thumbnail + spinner fades OUT when video starts playing
                   AnimatedOpacity(
                     opacity: _hasStartedPlaying ? 0.0 : 1.0,
-                    duration: const Duration(milliseconds: 300),
+                    duration: const Duration(milliseconds: 200),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // Direct YouTube CDN thumbnail — no API needed, always works
-                        Image.network(
-                          'https://img.youtube.com/vi/${widget.videoData['id']}/hqdefault.jpg',
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                          errorBuilder: (c, o, s) => Container(color: Colors.black87),
-                        ),
-                        // Only show spinner if manifest hasn't loaded yet
+                        // First frame if captured, else solid dark — NO network image
+                        _hasFirstFrame
+                          ? Image.memory(
+                              _firstFrame!,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true, // prevents flicker on rebuild
+                            )
+                          : Container(color: Colors.black87),
+
+                        // Spinner only while manifest is being fetched
                         if (!_isPlayerReady)
-                          Container(
-                            color: Colors.black38,
-                            child: const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.white70,
-                                strokeWidth: 2,
-                              ),
+                          const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white70,
+                              strokeWidth: 2,
                             ),
                           ),
                       ],
