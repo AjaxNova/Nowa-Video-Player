@@ -236,57 +236,60 @@ Future<void> prefetchYouTubeShorts({
 
 bool _isMetadataFetcherRunning = false;
 
+Future<void> _fetchVideoMetadataInBackground(String videoId) async {
+  final ytClient = yt.YoutubeExplode();
+  try {
+    final video = await ytClient.videos.get(videoId);
+    final updated = globalYouTubeShorts.value.map((v) {
+      if (v['id'] == videoId) {
+        return {
+          ...v,
+          'duration': video.duration?.inSeconds ?? 0,
+          'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String(),
+          'author': video.author,
+          'view_count': video.engagement.viewCount,
+          'like_count': video.engagement.likeCount,
+        };
+      }
+      return v;
+    }).toList();
+    globalYouTubeShorts.value = updated;
+  } catch (e) {
+    AppLogger.logWarning('[Shorts] Metadata fetch failed for $videoId: $e');
+    // Set duration to -1 so we don't try this failing video again in this run
+    final updated = globalYouTubeShorts.value.map((v) {
+      if (v['id'] == videoId) {
+        return {
+          ...v,
+          'duration': -1,
+        };
+      }
+      return v;
+    }).toList();
+    globalYouTubeShorts.value = updated;
+  } finally {
+    ytClient.close();
+  }
+}
+
 Future<void> _startBackgroundMetadataFetcher() async {
   if (_isMetadataFetcherRunning) return;
   _isMetadataFetcherRunning = true;
-  
-  final ytClient = yt.YoutubeExplode();
+
   try {
-    while (true) {
-      // Find the first video in globalYouTubeShorts that has duration == 0
-      Map<String, dynamic>? targetVideo;
-      try {
-        targetVideo = globalYouTubeShorts.value.firstWhere(
-          (v) => (v['duration'] as num? ?? 0) == 0,
-        );
-      } catch (_) {
-        // No more videos with duration 0
-        break;
-      }
-      
-      final id = targetVideo['id'] as String;
-      try {
-        final video = await ytClient.videos.get(id);
-        
-        // Update globally
-        final updated = globalYouTubeShorts.value.map((v) {
-          if (v['id'] == id) {
-            return {
-              ...v,
-              'duration': video.duration?.inSeconds ?? 0,
-              'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String(),
-              'author': video.author,
-              'view_count': video.engagement.viewCount,
-              'like_count': video.engagement.likeCount,
-            };
-          }
-          return v;
-        }).toList();
-        globalYouTubeShorts.value = updated;
-      } catch (e) {
-        AppLogger.logWarning('[Shorts] Background metadata fetch failed for $id: $e');
-        // Wait longer on rate limit or other failures
-        await Future.delayed(const Duration(seconds: 5));
-      }
-      
-      // Delay to avoid hitting YouTube rate limits
+    final List<String> videoIds = globalYouTubeShorts.value
+        .where((v) => (v['duration'] as num? ?? 0) == 0)
+        .map((v) => v['id'] as String)
+        .toList();
+
+    for (final id in videoIds) {
+      await _fetchVideoMetadataInBackground(id);
       await Future.delayed(const Duration(milliseconds: 1000));
     }
   } catch (e) {
     AppLogger.logWarning('[Shorts] Background metadata fetcher error: $e');
   } finally {
     _isMetadataFetcherRunning = false;
-    ytClient.close();
   }
 }
 

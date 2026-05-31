@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:media_kit/media_kit.dart';
@@ -256,13 +257,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                       _focusedIndex = index;
                     });
 
-                    // Precache next 3 thumbnails aggressively so they show instantly
-                    for (int i = index + 1; i <= index + 3 && i < _videos.length; i++) {
-                      final thumb = _videos[i]['thumbnail'];
-                      if (thumb != null && context.mounted) {
-                        precacheImage(NetworkImage(thumb), context);
-                      }
-                    }
 
                     // Re-seed every 3 videos
                     if (index > 0 && index % 3 == 0 && index < _videos.length) {
@@ -716,6 +710,8 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
   bool isTurboMode = false;
   StreamSubscription? _playingSub;
   StreamSubscription? _positionSub;
+  Uint8List? _firstFrame;
+  bool _hasFirstFrame = false;
 
   @override
   void initState() {
@@ -729,14 +725,6 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
     isShortsPiPMode.addListener(_syncPlayback);
 
     _initializeVideo();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (widget.videoData['thumbnail'] != null) {
-      precacheImage(NetworkImage(widget.videoData['thumbnail']), context);
-    }
   }
 
   Future<void> _initializeVideo() async {
@@ -787,6 +775,20 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         debugPrint("🤖 [Player] Opening stream URL: $streamUrl");
         await _player.open(Media(streamUrl), play: widget.isActive && isShortsTabActive.value);
         await _player.setPlaylistMode(PlaylistMode.loop);
+
+        // Grab first frame as thumbnail — zero network, instant, no flicker
+        _player.stream.buffering.listen((buffering) async {
+          if (!buffering && !_hasFirstFrame && mounted) {
+            await Future.delayed(const Duration(milliseconds: 200));
+            final frame = await _videoController.screenshot();
+            if (frame != null && mounted) {
+              setState(() {
+                _firstFrame = frame;
+                _hasFirstFrame = true;
+              });
+            }
+          }
+        });
 
         _playingSub = _player.stream.playing.listen((playing) {
           // Mark as started when video actually begins playing
@@ -925,22 +927,18 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                   // Thumbnail + spinner fades OUT when video starts playing
                   AnimatedOpacity(
                     opacity: _hasStartedPlaying ? 0.0 : 1.0,
-                    duration: const Duration(milliseconds: 400),
+                    duration: const Duration(milliseconds: 200),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // Thumbnail — always cached via hqdefault
-                        if (widget.videoData['thumbnail'] != null)
-                          Image.network(
-                            widget.videoData['thumbnail'],
-                            fit: BoxFit.cover,
-                            errorBuilder: (c, o, s) => Container(color: Colors.black),
-                          )
-                        else
-                          Container(color: Colors.black),
-
-                        // Slight dim over thumbnail
-                        Container(color: Colors.black26),
+                        // First frame if captured, else solid dark — NO network image
+                        _hasFirstFrame
+                          ? Image.memory(
+                              _firstFrame!,
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true, // prevents flicker on rebuild
+                            )
+                          : Container(color: Colors.black87),
 
                         // Spinner only while manifest is being fetched
                         if (!_isPlayerReady)
