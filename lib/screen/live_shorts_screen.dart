@@ -24,7 +24,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   final TextEditingController _searchController = TextEditingController();
   
   String _currentSort = 'Default';
-  List<Map<String, dynamic>> _originalVideos = [];
 
   @override
   void initState() {
@@ -35,8 +34,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     globalYouTubeShorts.addListener(_onGlobalShortsChanged);
     
     if (globalYouTubeShorts.value.isNotEmpty) {
-      _videos = globalYouTubeShorts.value;
-      _originalVideos = List.from(globalYouTubeShorts.value);
+      _videos = List.from(globalYouTubeShorts.value);
       _isLoading = false;
       prefetchYouTubeShorts(limit: 10, append: true);
     } else {
@@ -47,12 +45,36 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   void _onGlobalShortsChanged() {
     if (mounted) {
       setState(() {
-        _videos = globalYouTubeShorts.value;
-        if (_currentSort == 'Default') {
-          _originalVideos = List.from(_videos);
-        }
+        _videos = List.from(globalYouTubeShorts.value);
+        _applySortLocal(_currentSort);
       });
     }
+  }
+
+  void _applySortLocal(String sortType) {
+    if (sortType == 'Default') return;
+    _videos.sort((a, b) {
+      switch (sortType) {
+        case 'Newest':
+          final aDate = DateTime.tryParse(a['publish_date'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = DateTime.tryParse(b['publish_date'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return bDate.compareTo(aDate); // Descending
+        case 'Oldest':
+          final aDate = DateTime.tryParse(a['publish_date'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          final bDate = DateTime.tryParse(b['publish_date'] ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+          return aDate.compareTo(bDate); // Ascending
+        case 'Shortest':
+          final aDur = a['duration'] as num? ?? 0;
+          final bDur = b['duration'] as num? ?? 0;
+          return aDur.compareTo(bDur); // Ascending
+        case 'Longest':
+          final aDur = a['duration'] as num? ?? 0;
+          final bDur = b['duration'] as num? ?? 0;
+          return bDur.compareTo(aDur); // Descending
+        default:
+          return 0;
+      }
+    });
   }
 
   Future<void> _fetchShorts() async {
@@ -63,11 +85,11 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     await prefetchYouTubeShorts(limit: 10);
     if (mounted) {
       setState(() {
-        _videos = globalYouTubeShorts.value;
+        _videos = List.from(globalYouTubeShorts.value);
+        _applySortLocal(_currentSort);
         _isLoading = globalYouTubeShorts.value.isEmpty; // stay loading if empty!
         _errorMessage = youtubeShortsError;
       });
-
     }
   }
 
@@ -85,11 +107,11 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     await prefetchYouTubeShorts(limit: 10, query: query, append: false, force: true);
     if (mounted) {
       setState(() {
-        _videos = globalYouTubeShorts.value;
+        _videos = List.from(globalYouTubeShorts.value);
+        _applySortLocal(_currentSort);
         _isLoading = globalYouTubeShorts.value.isEmpty;
         _errorMessage = youtubeShortsError;
       });
-
     }
   }
 
@@ -107,11 +129,11 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     await prefetchYouTubeShorts(limit: 10, query: 'malayalam shorts', append: false, force: true);
     if (mounted) {
       setState(() {
-        _videos = globalYouTubeShorts.value;
+        _videos = List.from(globalYouTubeShorts.value);
+        _applySortLocal(_currentSort);
         _isLoading = globalYouTubeShorts.value.isEmpty;
         _errorMessage = youtubeShortsError;
       });
-
     }
   }
 
@@ -254,58 +276,10 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   }
 
   void _applySort(String sortType) {
-    if (_videos.isEmpty) return;
-    
-    if (_originalVideos.isEmpty) {
-      _originalVideos = List.from(globalYouTubeShorts.value);
-    }
-
-    List<Map<String, dynamic>> sortedList = List.from(globalYouTubeShorts.value);
-
-    switch (sortType) {
-      case 'Newest':
-        sortedList.sort((a, b) {
-          final aDateStr = a['publish_date'] as String?;
-          final bDateStr = b['publish_date'] as String?;
-          if (aDateStr == null) return 1;
-          if (bDateStr == null) return -1;
-          return bDateStr.compareTo(aDateStr); // Descending
-        });
-        break;
-      case 'Oldest':
-        sortedList.sort((a, b) {
-          final aDateStr = a['publish_date'] as String?;
-          final bDateStr = b['publish_date'] as String?;
-          if (aDateStr == null) return 1;
-          if (bDateStr == null) return -1;
-          return aDateStr.compareTo(bDateStr); // Ascending
-        });
-        break;
-      case 'Shortest':
-        sortedList.sort((a, b) {
-          final aDur = a['duration'] as num? ?? 0;
-          final bDur = b['duration'] as num? ?? 0;
-          return aDur.compareTo(bDur); // Ascending
-        });
-        break;
-      case 'Longest':
-        sortedList.sort((a, b) {
-          final aDur = a['duration'] as num? ?? 0;
-          final bDur = b['duration'] as num? ?? 0;
-          return bDur.compareTo(aDur); // Descending
-        });
-        break;
-      case 'Default':
-      default:
-        if (_originalVideos.length == sortedList.length) {
-          sortedList = List.from(_originalVideos);
-        }
-        break;
-    }
-
     setState(() {
       _currentSort = sortType;
-      globalYouTubeShorts.value = sortedList;
+      _videos = List.from(globalYouTubeShorts.value);
+      _applySortLocal(sortType);
       _focusedIndex = 0;
     });
     
@@ -465,6 +439,18 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                     border: Border.all(color: Colors.white10),
                   ),
                   child: IconButton(
+                    icon: const Icon(Icons.info_outline_rounded, color: Colors.white, size: 24),
+                    onPressed: _showVideoInfoDialog,
+                  ),
+                ),
+                SizedBox(width: 12.w),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: IconButton(
                     icon: Icon(
                       _currentSort == 'Default' ? Icons.filter_list_rounded : Icons.filter_list_off_rounded,
                       color: _currentSort == 'Default' ? Colors.white : colorGreen,
@@ -496,6 +482,91 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
             ),
           );
         },
+      ),
+    );
+  }
+
+  void _showVideoInfoDialog() {
+    activeShortsPlayer.value?.pause();
+    isShortsPlaying.value = false;
+
+    if (_focusedIndex >= _videos.length) return;
+    final currentVideo = _videos[_focusedIndex];
+
+    final title = currentVideo['title'] ?? 'N/A';
+    final id = currentVideo['id'] ?? 'N/A';
+    final publishDateStr = currentVideo['publish_date'] as String?;
+    final publishDate = publishDateStr != null ? DateTime.tryParse(publishDateStr) : null;
+    final formattedDate = publishDate != null
+        ? "${publishDate.day}/${publishDate.month}/${publishDate.year}"
+        : 'N/A';
+    final durationSecs = currentVideo['duration'] as num? ?? 0;
+    final minutes = durationSecs ~/ 60;
+    final seconds = durationSecs % 60;
+    final durationText = durationSecs > 0 ? "$minutes:${seconds.toString().padLeft(2, '0')}" : 'N/A';
+
+    final author = currentVideo['author'] ?? 'N/A';
+    final viewCount = currentVideo['view_count'];
+    final likeCount = currentVideo['like_count'];
+    final viewsText = viewCount != null ? viewCount.toString() : 'N/A';
+    final likesText = likeCount != null ? likeCount.toString() : 'N/A';
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: const Color(0xFF161616),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16.r),
+            side: const BorderSide(color: Colors.white10),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.info_outline_rounded, color: colorGreen),
+              SizedBox(width: 8.w),
+              const Text("Video Information", style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _infoRow("Title:", title),
+              _infoRow("ID:", id),
+              _infoRow("Author:", author),
+              _infoRow("Duration:", durationText),
+              _infoRow("Upload Date:", formattedDate),
+              _infoRow("Views:", viewsText),
+              _infoRow("Likes:", likesText),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("Close", style: TextStyle(color: colorGreen)),
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      if (mounted) {
+        activeShortsPlayer.value?.play();
+        isShortsPlaying.value = true;
+      }
+    });
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: 4.h),
+      child: RichText(
+        text: TextSpan(
+          style: TextStyle(color: Colors.white70, fontSize: 13.sp),
+          children: [
+            TextSpan(text: "$label ", style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+            TextSpan(text: value),
+          ],
+        ),
       ),
     );
   }
@@ -618,9 +689,11 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
   late final Player _player;
   late final VideoController _videoController;
   bool _isPlayerReady = false;
+  bool _hasStartedPlaying = false;
   bool _isManuallyPaused = false;
   bool isTurboMode = false;
   StreamSubscription? _playingSub;
+  StreamSubscription? _positionSub;
 
   @override
   void initState() {
@@ -634,6 +707,14 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
     isShortsPiPMode.addListener(_syncPlayback);
 
     _initializeVideo();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.videoData['thumbnail'] != null) {
+      precacheImage(NetworkImage(widget.videoData['thumbnail']), context);
+    }
   }
 
   Future<void> _initializeVideo() async {
@@ -652,10 +733,22 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
           final muxed = manifest.muxed.sortByVideoQuality();
           if (muxed.isNotEmpty) {
             streamUrl = muxed.first.url.toString();
+            
+            // Dynamically fetch video metadata too (views, duration, upload date etc.!)
+            final video = await ytClient.videos.get(widget.videoData['id']);
+
             // Cache it back in global state so next time it loads instantly
             final updated = globalYouTubeShorts.value.map((v) {
               if (v['id'] == widget.videoData['id']) {
-                return {...v, 'stream_url': streamUrl};
+                return {
+                  ...v,
+                  'stream_url': streamUrl,
+                  'duration': video.duration?.inSeconds ?? 0,
+                  'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+                  'author': video.author,
+                  'view_count': video.engagement.viewCount,
+                  'like_count': video.engagement.likeCount,
+                };
               }
               return v;
             }).toList();
@@ -676,6 +769,14 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         _playingSub = _player.stream.playing.listen((playing) {
           if (widget.isActive && mounted) {
             isShortsPlaying.value = playing;
+          }
+        });
+
+        _positionSub = _player.stream.position.listen((pos) {
+          if (pos > Duration.zero && !_hasStartedPlaying && mounted) {
+            setState(() {
+              _hasStartedPlaying = true;
+            });
           }
         });
 
@@ -740,6 +841,7 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
     isShortsTabActive.removeListener(_syncPlayback);
     isShortsPiPMode.removeListener(_syncPlayback);
     _playingSub?.cancel();
+    _positionSub?.cancel();
 
     if (activeShortsPlayer.value == _player) {
       activeShortsPlayer.value = null;
@@ -784,15 +886,19 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 1. The Video Component Surface
+            // 1. The Video Component Surface & Seamless Thumbnail Overlay
             Positioned.fill(
-              child: _isPlayerReady
-                  ? Video(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (_isPlayerReady)
+                    Video(
                       controller: _videoController,
                       controls: NoVideoControls,
                       fit: BoxFit.cover,
-                    )
-                  : Stack(
+                    ),
+                  if (!_hasStartedPlaying)
+                    Stack(
                       fit: StackFit.expand,
                       children: [
                         if (widget.videoData['thumbnail'] != null)
@@ -806,11 +912,14 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                         Container(
                           color: Colors.black38, // Dim the placeholder slightly
                         ),
-                        const Center(
-                          child: CircularProgressIndicator(color: Colors.white70),
-                        ),
+                        if (!_isPlayerReady)
+                          const Center(
+                            child: CircularProgressIndicator(color: Colors.white70),
+                          ),
                       ],
                     ),
+                ],
+              ),
             ),
 
             // Instagram-style 2X Speed Hint

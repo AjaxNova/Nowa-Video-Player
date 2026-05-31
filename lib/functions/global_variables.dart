@@ -1,5 +1,7 @@
 // ignore_for_file: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
 
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
@@ -75,27 +77,105 @@ Future<void> prefetchYouTubeShorts({
 
     if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
       AppLogger.log('[Shorts] Loading default Malayalam curated feed from playlist: $curatedPlaylistId...');
-      final videos = await ytClient.playlists
-          .getVideos(curatedPlaylistId)
-          .take(150)
-          .toList();
+      
+      // Try fetching using YoutubeExplode first
+      List<yt.Video> videos = [];
+      try {
+        videos = await ytClient.playlists
+            .getVideos(curatedPlaylistId)
+            .take(150)
+            .toList();
+      } catch (e) {
+        AppLogger.logWarning('[Shorts] YoutubeExplode playlist fetch failed: $e');
+      }
 
       final existingIds = globalYouTubeShorts.value
           .map((v) => v['id'] as String)
           .toSet();
 
-      newVideos = videos
-          .where((v) => !existingIds.contains(v.id.value))
-          .map((v) => {
-            'id': v.id.value,
-            'title': v.title,
-            'thumbnail': v.thumbnails.mediumResUrl,
-            'duration': v.duration?.inSeconds ?? 0,
-            'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
-            'stream_url': null, // lazy fetched per video
-            'seedVideo': v,
-          })
-          .toList();
+      if (videos.isNotEmpty) {
+        newVideos = videos
+            .where((v) => !existingIds.contains(v.id.value))
+            .map((v) => {
+              'id': v.id.value,
+              'title': v.title,
+              'thumbnail': v.thumbnails.mediumResUrl,
+              'duration': v.duration?.inSeconds ?? 0,
+              'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+              'stream_url': null, // lazy fetched per video
+              'seedVideo': v,
+            })
+            .toList();
+      } else {
+        AppLogger.log('[Shorts] YoutubeExplode returned 0 videos. Trying InnerTube scraper fallback...');
+        try {
+          final url = Uri.parse('https://www.youtube.com/youtubei/v1/browse?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8');
+          final headers = {
+            'content-type': 'application/json',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
+          };
+          final body = json.encode({
+            "context": {
+              "client": {
+                "browserName": "Chrome",
+                "browserVersion": "105.0.0.0",
+                "clientFormFactor": "UNKNOWN_FORM_FACTOR",
+                "clientName": "WEB",
+                "clientVersion": "2.20220921.00.00"
+              }
+            },
+            "browseId": "VL$curatedPlaylistId"
+          });
+
+          final response = await http.post(url, headers: headers, body: body);
+          if (response.statusCode == 200) {
+            final data = json.decode(response.body);
+            final Set<String> seenIds = {};
+            final List<Map<String, dynamic>> parsedVideos = [];
+
+            void findKeys(dynamic obj) {
+              if (obj is Map) {
+                if (obj.containsKey('shortsLockupViewModel')) {
+                  final model = obj['shortsLockupViewModel'];
+                  final videoId = model['onTap']?['innertubeCommand']?['reelWatchEndpoint']?['videoId'] as String?;
+                  final title = model['overlayMetadata']?['primaryText']?['content'] as String? ?? model['accessibilityText'] as String? ?? '';
+                  final thumbnails = model['thumbnailViewModel']?['thumbnailViewModel']?['image']?['sources'] as List?;
+                  final thumbnailUrl = thumbnails != null && thumbnails.isNotEmpty ? thumbnails.first['url'] as String? : null;
+
+                  if (videoId != null && videoId.isNotEmpty && !seenIds.contains(videoId)) {
+                    seenIds.add(videoId);
+                    parsedVideos.add({
+                      'id': videoId,
+                      'title': title,
+                    'thumbnail': 'https://img.youtube.com/vi/$videoId/hqdefault.jpg',
+                      'duration': 0,
+                      'publish_date': DateTime.now().toIso8601String(),
+                      'stream_url': null,
+                      'seedVideo': null,
+                    });
+                  }
+                } else {
+                  for (var val in obj.values) {
+                    findKeys(val);
+                  }
+                }
+              } else if (obj is List) {
+                for (var val in obj) {
+                  findKeys(val);
+                }
+              }
+            }
+
+            findKeys(data);
+            newVideos = parsedVideos.where((v) => !existingIds.contains(v['id'])).toList();
+            AppLogger.log('[Shorts] InnerTube scraper parsed ${newVideos.length} new videos from curated playlist.');
+          } else {
+            AppLogger.logWarning('[Shorts] InnerTube browse failed: ${response.statusCode}');
+          }
+        } catch (innerErr, stack) {
+          AppLogger.logError('[Shorts] InnerTube scraper failed', innerErr, stack);
+        }
+      }
     } else {
       AppLogger.log('[Shorts] Searching YouTube for "$currentSearchQuery"...');
       if (_cachedSearchQuery != currentSearchQuery || _cachedSearchResults.isEmpty) {
@@ -147,6 +227,65 @@ Future<void> prefetchYouTubeShorts({
     if (_fetchVersion == myVersion) {
       isYouTubeShortsLoading = false;
     }
+    ytClient.close();
+    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' && globalYouTubeShorts.value.isNotEmpty) {
+      _startBackgroundMetadataFetcher();
+    }
+  }
+}
+
+bool _isMetadataFetcherRunning = false;
+
+Future<void> _startBackgroundMetadataFetcher() async {
+  if (_isMetadataFetcherRunning) return;
+  _isMetadataFetcherRunning = true;
+  
+  final ytClient = yt.YoutubeExplode();
+  try {
+    while (true) {
+      // Find the first video in globalYouTubeShorts that has duration == 0
+      Map<String, dynamic>? targetVideo;
+      try {
+        targetVideo = globalYouTubeShorts.value.firstWhere(
+          (v) => (v['duration'] as num? ?? 0) == 0,
+        );
+      } catch (_) {
+        // No more videos with duration 0
+        break;
+      }
+      
+      final id = targetVideo['id'] as String;
+      try {
+        final video = await ytClient.videos.get(id);
+        
+        // Update globally
+        final updated = globalYouTubeShorts.value.map((v) {
+          if (v['id'] == id) {
+            return {
+              ...v,
+              'duration': video.duration?.inSeconds ?? 0,
+              'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+              'author': video.author,
+              'view_count': video.engagement.viewCount,
+              'like_count': video.engagement.likeCount,
+            };
+          }
+          return v;
+        }).toList();
+        globalYouTubeShorts.value = updated;
+      } catch (e) {
+        AppLogger.logWarning('[Shorts] Background metadata fetch failed for $id: $e');
+        // Wait longer on rate limit or other failures
+        await Future.delayed(const Duration(seconds: 5));
+      }
+      
+      // Delay to avoid hitting YouTube rate limits
+      await Future.delayed(const Duration(milliseconds: 1000));
+    }
+  } catch (e) {
+    AppLogger.logWarning('[Shorts] Background metadata fetcher error: $e');
+  } finally {
+    _isMetadataFetcherRunning = false;
     ytClient.close();
   }
 }
