@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:media_kit/media_kit.dart';
@@ -37,9 +36,25 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     if (globalYouTubeShorts.value.isNotEmpty) {
       _videos = List.from(globalYouTubeShorts.value);
       _isLoading = false;
+      // Preload first 10 thumbnails immediately
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _preloadThumbnails(0, 10);
+      });
       prefetchYouTubeShorts(limit: 10, append: true);
     } else {
       _fetchShorts();
+    }
+  }
+
+  void _preloadThumbnails(int from, int count) {
+    for (int i = from; i < from + count && i < _videos.length; i++) {
+      final id = _videos[i]['id'] as String?;
+      if (id != null && context.mounted) {
+        precacheImage(
+          NetworkImage('https://img.youtube.com/vi/$id/hqdefault.jpg'),
+          context,
+        );
+      }
     }
   }
 
@@ -50,10 +65,13 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
       _videos = List.from(globalYouTubeShorts.value);
       if (_currentSort != 'Default') _applySortLocal(_currentSort);
     });
-    // Restore scroll position after rebuild to prevent snap attack
+    // Preload thumbnails around the saved index
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients) {
-        _pageController.jumpToPage(savedIndex);
+      if (mounted) {
+        _preloadThumbnails(savedIndex, 10);
+        if (_pageController.hasClients) {
+          _pageController.jumpToPage(savedIndex);
+        }
       }
     });
   }
@@ -257,6 +275,8 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                       _focusedIndex = index;
                     });
 
+                    // Preload next 5 thumbnails
+                    _preloadThumbnails(index + 1, 5);
 
                     // Re-seed every 3 videos
                     if (index > 0 && index % 3 == 0 && index < _videos.length) {
@@ -710,8 +730,6 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
   bool isTurboMode = false;
   StreamSubscription? _playingSub;
   StreamSubscription? _positionSub;
-  Uint8List? _firstFrame;
-  bool _hasFirstFrame = false;
 
   @override
   void initState() {
@@ -725,29 +743,6 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
     isShortsPiPMode.addListener(_syncPlayback);
 
     _initializeVideo();
-  }
-
-  Future<void> _captureFirstFrame() async {
-    if (_hasFirstFrame || !mounted) return;
-    Uint8List? frame;
-    int retries = 0;
-    while (frame == null && retries < 15 && mounted) {
-      try {
-        frame = await _player.screenshot();
-      } catch (e) {
-        debugPrint("🤖 [Player] Screenshot retry $retries error: $e");
-      }
-      if (frame != null) break;
-      retries++;
-      await Future.delayed(Duration(milliseconds: 100 + (retries * 50)));
-    }
-    if (frame != null && mounted && !_hasFirstFrame) {
-      setState(() {
-        _firstFrame = frame;
-        _hasFirstFrame = true;
-      });
-      debugPrint("🤖 [Player] Successfully captured first frame screenshot after $retries retries.");
-    }
   }
 
   Future<void> _initializeVideo() async {
@@ -799,18 +794,10 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         await _player.open(Media(streamUrl), play: widget.isActive && isShortsTabActive.value);
         await _player.setPlaylistMode(PlaylistMode.loop);
 
-        // Grab first frame as thumbnail — zero network, instant, no flicker
-        _player.stream.buffering.listen((buffering) {
-          if (!buffering && !_hasFirstFrame && mounted) {
-            _captureFirstFrame();
-          }
-        });
-
         _playingSub = _player.stream.playing.listen((playing) {
           // Mark as started when video actually begins playing
           if (playing && !_hasStartedPlaying && mounted) {
             setState(() => _hasStartedPlaying = true);
-            _captureFirstFrame();
           }
           if (widget.isActive && mounted) {
             isShortsPlaying.value = playing;
@@ -944,25 +931,26 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                   // Thumbnail + spinner fades OUT when video starts playing
                   AnimatedOpacity(
                     opacity: _hasStartedPlaying ? 0.0 : 1.0,
-                    duration: const Duration(milliseconds: 200),
+                    duration: const Duration(milliseconds: 300),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        // First frame if captured, else solid dark — NO network image
-                        _hasFirstFrame
-                          ? Image.memory(
-                              _firstFrame!,
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true, // prevents flicker on rebuild
-                            )
-                          : Container(color: Colors.black87),
-
-                        // Spinner only while manifest is being fetched
+                        // Direct YouTube CDN thumbnail — no API needed, always works
+                        Image.network(
+                          'https://img.youtube.com/vi/${widget.videoData['id']}/hqdefault.jpg',
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                          errorBuilder: (c, o, s) => Container(color: Colors.black87),
+                        ),
+                        // Only show spinner if manifest hasn't loaded yet
                         if (!_isPlayerReady)
-                          const Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.white70,
-                              strokeWidth: 2,
+                          Container(
+                            color: Colors.black38,
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.white70,
+                                strokeWidth: 2,
+                              ),
                             ),
                           ),
                       ],
