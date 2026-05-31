@@ -780,7 +780,7 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         _player.stream.buffering.listen((buffering) async {
           if (!buffering && !_hasFirstFrame && mounted) {
             await Future.delayed(const Duration(milliseconds: 200));
-            final frame = await _videoController.screenshot();
+            final frame = await _player.screenshot();
             if (frame != null && mounted) {
               setState(() {
                 _firstFrame = frame;
