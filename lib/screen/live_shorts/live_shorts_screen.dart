@@ -569,8 +569,9 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                     final videoData = _controller.videos[index];
                     return ShortsPlayerTile(
                       key: ValueKey(videoData['id']),
+                      index: index,
                       videoData: videoData,
-                      isActive: index == _controller.focusedIndex,
+                      pool: _controller.pool,
                     );
                   },
                 ),

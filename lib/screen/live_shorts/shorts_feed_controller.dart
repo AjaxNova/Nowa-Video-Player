@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'shorts_stream_cache.dart';
+import 'shorts_player_pool.dart';
 
 class ShortsFeedController extends ChangeNotifier {
   List<Map<String, dynamic>> _videos = [];
@@ -10,6 +11,7 @@ class ShortsFeedController extends ChangeNotifier {
   String? _errorMessage;
 
   final PageController pageController = PageController();
+  late final ShortsPlayerPool pool;
 
   List<Map<String, dynamic>> get videos => _videos;
   int get focusedIndex => _focusedIndex;
@@ -18,6 +20,7 @@ class ShortsFeedController extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
 
   ShortsFeedController() {
+    pool = ShortsPlayerPool();
     globalYouTubeShorts.addListener(_onGlobalShortsChanged);
     _initializeFeed();
   }
@@ -26,8 +29,9 @@ class ShortsFeedController extends ChangeNotifier {
     if (globalYouTubeShorts.value.isNotEmpty) {
       _videos = List.from(globalYouTubeShorts.value);
       _isLoading = false;
-      // Pre-warm the cache for initial load
+      // Pre-warm the cache and pool players
       ShortsStreamCache.instance.warmUpAround(0, _videos);
+      pool.updateActiveIndex(0, _videos);
       prefetchYouTubeShorts(limit: 10, append: true);
     } else {
       fetchShorts();
@@ -48,6 +52,7 @@ class ShortsFeedController extends ChangeNotifier {
         pageController.jumpToPage(savedIndex);
       }
       ShortsStreamCache.instance.warmUpAround(savedIndex, _videos);
+      pool.updateActiveIndex(savedIndex, _videos);
     });
   }
 
@@ -57,8 +62,9 @@ class ShortsFeedController extends ChangeNotifier {
     _focusedIndex = index;
     notifyListeners();
 
-    // Trigger pre-warming around current active scroll settled index
+    // Trigger pre-warming and pool updates around active settled index
     ShortsStreamCache.instance.warmUpAround(index, _videos);
+    pool.updateActiveIndex(index, _videos);
 
     // Dynamic refilling before reaching the absolute end of scroll view
     if (index >= _videos.length - 5) {
@@ -84,6 +90,7 @@ class ShortsFeedController extends ChangeNotifier {
 
     if (_videos.isNotEmpty) {
       ShortsStreamCache.instance.warmUpAround(_focusedIndex, _videos);
+      pool.updateActiveIndex(_focusedIndex, _videos);
     }
   }
 
@@ -95,6 +102,8 @@ class ShortsFeedController extends ChangeNotifier {
       _applySortLocal(sortType);
     }
     notifyListeners();
+    // Refresh pool targeting active sort changes
+    pool.updateActiveIndex(_focusedIndex, _videos);
   }
 
   void _applySortLocal(String sortType) {
@@ -138,6 +147,7 @@ class ShortsFeedController extends ChangeNotifier {
 
     if (_videos.isNotEmpty) {
       ShortsStreamCache.instance.warmUpAround(0, _videos);
+      pool.updateActiveIndex(0, _videos);
     }
   }
 
@@ -145,6 +155,7 @@ class ShortsFeedController extends ChangeNotifier {
   void dispose() {
     globalYouTubeShorts.removeListener(_onGlobalShortsChanged);
     pageController.dispose();
+    pool.dispose();
     super.dispose();
   }
 }
