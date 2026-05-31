@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'shorts_feed_controller.dart';
 import 'shorts_player_tile.dart';
+import 'shorts_stream_cache.dart';
 
 class ShortsFeedScreen extends StatefulWidget {
   const ShortsFeedScreen({super.key});
@@ -534,8 +535,21 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                 onNotification: (notification) {
                   if (notification is ScrollStartNotification) {
                     isShortsScrolling.value = true;
+                  } else if (notification is ScrollUpdateNotification) {
+                    // Prewarm nearest index while user drags
+                    final page = _controller.pageController.page;
+                    if (page != null) {
+                      final nearestIndex = page.round();
+                      ShortsStreamCache.instance.warmUpAround(nearestIndex, _controller.videos);
+                    }
                   } else if (notification is ScrollEndNotification) {
                     isShortsScrolling.value = false;
+                    // Commit active index only when scroll ends (settles)
+                    final page = _controller.pageController.page;
+                    if (page != null) {
+                      final settledIndex = page.round();
+                      _controller.setFocusedIndex(settledIndex);
+                    }
                   }
                   return true;
                 },
@@ -543,9 +557,14 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                   key: const PageStorageKey('shorts_feed'),
                   controller: _controller.pageController,
                   scrollDirection: Axis.vertical,
-                  physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+                  physics: const FastShortsPagePhysics(parent: ClampingScrollPhysics()),
                   itemCount: _controller.videos.length,
-                  onPageChanged: _controller.onPageChanged,
+                  onPageChanged: (index) {
+                    // Trigger prefetch refill when getting close to end
+                    if (index >= _controller.videos.length - 5) {
+                      prefetchYouTubeShorts(limit: 10, append: true);
+                    }
+                  },
                   itemBuilder: (context, index) {
                     final videoData = _controller.videos[index];
                     return ShortsPlayerTile(
@@ -565,4 +584,26 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
       ),
     );
   }
+}
+
+class FastShortsPagePhysics extends PageScrollPhysics {
+  const FastShortsPagePhysics({super.parent});
+
+  @override
+  FastShortsPagePhysics applyTo(ScrollPhysics? ancestor) {
+    return FastShortsPagePhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+        mass: 0.45,
+        stiffness: 420,
+        damping: 32,
+      );
+
+  @override
+  Tolerance get tolerance => const Tolerance(
+        velocity: 1.0,
+        distance: 0.5,
+      );
 }

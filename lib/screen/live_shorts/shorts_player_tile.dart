@@ -123,11 +123,14 @@ class _ShortsPlayerTileState extends State<ShortsPlayerTile> with WidgetsBinding
         }
       });
 
-      // The Thumbnail remains visible until position has moved beyond 0 (first frame painted)
+      // The Thumbnail remains visible until position has moved beyond 0 or video size is resolved
       _positionSub = _player.stream.position.listen((pos) {
-        if (!_hasFirstFrame && pos > Duration.zero && mounted) {
+        final hasPosition = pos > Duration.zero;
+        final hasSize = _player.state.width != null && _player.state.height != null;
+
+        if (!_hasFirstFrame && (hasPosition || hasSize) && mounted) {
           setState(() => _hasFirstFrame = true);
-          debugPrint("🤖 [ShortsTile] First frame rendered for: $videoId");
+          debugPrint("🤖 [ShortsTile] First frame rendered for: $videoId (pos: $pos, size: ${_player.state.width}x${_player.state.height})");
         }
       });
 

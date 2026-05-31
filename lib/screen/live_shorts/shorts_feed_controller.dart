@@ -51,11 +51,12 @@ class ShortsFeedController extends ChangeNotifier {
     });
   }
 
-  void onPageChanged(int index) {
+  void setFocusedIndex(int index) {
+    if (_focusedIndex == index) return;
     _focusedIndex = index;
     notifyListeners();
 
-    // Trigger pre-warming around current active scroll index
+    // Trigger pre-warming around current active scroll settled index
     ShortsStreamCache.instance.warmUpAround(index, _videos);
 
     // Dynamic refilling before reaching the absolute end of scroll view
