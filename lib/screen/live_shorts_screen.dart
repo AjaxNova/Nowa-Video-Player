@@ -43,12 +43,18 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   }
 
   void _onGlobalShortsChanged() {
-    if (mounted) {
-      setState(() {
-        _videos = List.from(globalYouTubeShorts.value);
-        _applySortLocal(_currentSort);
-      });
-    }
+    if (!mounted) return;
+    final savedIndex = _focusedIndex; // save before rebuild
+    setState(() {
+      _videos = List.from(globalYouTubeShorts.value);
+      if (_currentSort != 'Default') _applySortLocal(_currentSort);
+    });
+    // Restore scroll position after rebuild to prevent snap attack
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _pageController.hasClients) {
+        _pageController.jumpToPage(savedIndex);
+      }
+    });
   }
 
   void _applySortLocal(String sortType) {
@@ -240,6 +246,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                   return true;
                 },
                 child: PageView.builder(
+                  key: const PageStorageKey('shorts_feed'),
                   controller: _pageController,
                   scrollDirection: Axis.vertical,
                   physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
@@ -248,18 +255,33 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                     setState(() {
                       _focusedIndex = index;
                     });
-                    
+
+                    // Precache next 3 thumbnails aggressively so they show instantly
+                    for (int i = index + 1; i <= index + 3 && i < _videos.length; i++) {
+                      final thumb = _videos[i]['thumbnail'];
+                      if (thumb != null && context.mounted) {
+                        precacheImage(NetworkImage(thumb), context);
+                      }
+                    }
+
+                    // Re-seed every 3 videos
+                    if (index > 0 && index % 3 == 0 && index < _videos.length) {
+                      final seedVideo = _videos[index]['seedVideo'];
+                      if (seedVideo != null) {
+                        streamRelatedVideosIntoFeed(seedVideo as yt.Video);
+                      }
+                    }
+
                     // Trigger prefetch when getting close to the end
                     if (index >= _videos.length - 5) {
                       prefetchYouTubeShorts(limit: 10, append: true);
                     }
-
-
                   },
                   itemBuilder: (context, index) {
+                    final videoData = _videos[index];
                     return SingleShortPlayer(
-                      key: ValueKey(_videos[index]['stream_url']),
-                      videoData: _videos[index],
+                      key: ValueKey(videoData['id']),
+                      videoData: videoData,
                       isActive: index == _focusedIndex,
                     );
                   },
@@ -744,7 +766,7 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                   ...v,
                   'stream_url': streamUrl,
                   'duration': video.duration?.inSeconds ?? 0,
-                  'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+                  'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String(),
                   'author': video.author,
                   'view_count': video.engagement.viewCount,
                   'like_count': video.engagement.likeCount,
@@ -767,17 +789,18 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
         await _player.setPlaylistMode(PlaylistMode.loop);
 
         _playingSub = _player.stream.playing.listen((playing) {
+          // Mark as started when video actually begins playing
+          if (playing && !_hasStartedPlaying && mounted) {
+            setState(() => _hasStartedPlaying = true);
+          }
           if (widget.isActive && mounted) {
             isShortsPlaying.value = playing;
           }
         });
 
+        // Keep position sub only for loop detection if needed, remove _hasStartedPlaying from it
         _positionSub = _player.stream.position.listen((pos) {
-          if (pos > Duration.zero && !_hasStartedPlaying && mounted) {
-            setState(() {
-              _hasStartedPlaying = true;
-            });
-          }
+          // intentionally empty or remove entirely
         });
 
         if (mounted) {
@@ -891,16 +914,22 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
               child: Stack(
                 fit: StackFit.expand,
                 children: [
+                  // Video always underneath
                   if (_isPlayerReady)
                     Video(
                       controller: _videoController,
                       controls: NoVideoControls,
                       fit: BoxFit.cover,
                     ),
-                  if (!_hasStartedPlaying)
-                    Stack(
+
+                  // Thumbnail + spinner fades OUT when video starts playing
+                  AnimatedOpacity(
+                    opacity: _hasStartedPlaying ? 0.0 : 1.0,
+                    duration: const Duration(milliseconds: 400),
+                    child: Stack(
                       fit: StackFit.expand,
                       children: [
+                        // Thumbnail — always cached via hqdefault
                         if (widget.videoData['thumbnail'] != null)
                           Image.network(
                             widget.videoData['thumbnail'],
@@ -909,15 +938,21 @@ class _SingleShortPlayerState extends State<SingleShortPlayer> with WidgetsBindi
                           )
                         else
                           Container(color: Colors.black),
-                        Container(
-                          color: Colors.black38, // Dim the placeholder slightly
-                        ),
+
+                        // Slight dim over thumbnail
+                        Container(color: Colors.black26),
+
+                        // Spinner only while manifest is being fetched
                         if (!_isPlayerReady)
                           const Center(
-                            child: CircularProgressIndicator(color: Colors.white70),
+                            child: CircularProgressIndicator(
+                              color: Colors.white70,
+                              strokeWidth: 2,
+                            ),
                           ),
                       ],
                     ),
+                  ),
                 ],
               ),
             ),

@@ -193,7 +193,7 @@ Future<void> prefetchYouTubeShorts({
           .map((v) => {
             'id': v.id.value,
             'title': v.title,
-            'thumbnail': v.thumbnails.mediumResUrl,
+            'thumbnail': 'https://img.youtube.com/vi/${v.id.value}/hqdefault.jpg',
             'duration': v.duration?.inSeconds ?? 0,
             'publish_date': v.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
             'stream_url': null, // lazy fetched per video
@@ -264,7 +264,7 @@ Future<void> _startBackgroundMetadataFetcher() async {
             return {
               ...v,
               'duration': video.duration?.inSeconds ?? 0,
-              'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String() ?? DateTime.now().toIso8601String(),
+              'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String(),
               'author': video.author,
               'view_count': video.engagement.viewCount,
               'like_count': video.engagement.likeCount,
