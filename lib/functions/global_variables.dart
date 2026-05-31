@@ -228,7 +228,7 @@ Future<void> prefetchYouTubeShorts({
       isYouTubeShortsLoading = false;
     }
     ytClient.close();
-    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' && globalYouTubeShorts.value.isNotEmpty) {
+    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' && globalYouTubeShorts.value.isNotEmpty && !append) {
       _startBackgroundMetadataFetcher();
     }
   }
@@ -254,6 +254,15 @@ Future<void> _fetchVideoMetadataInBackground(String videoId) async {
       return v;
     }).toList();
     globalYouTubeShorts.value = updated;
+    try {
+      final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
+      final cacheData = updated.map((v) {
+        final cacheMap = Map<String, dynamic>.from(v);
+        cacheMap.remove('seedVideo');
+        return cacheMap;
+      }).toList();
+      await cacheBox.put(currentSearchQuery, cacheData);
+    } catch (_) {}
   } catch (e) {
     AppLogger.logWarning('[Shorts] Metadata fetch failed for $videoId: $e');
     // Set duration to -1 so we don't try this failing video again in this run
@@ -267,6 +276,15 @@ Future<void> _fetchVideoMetadataInBackground(String videoId) async {
       return v;
     }).toList();
     globalYouTubeShorts.value = updated;
+    try {
+      final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
+      final cacheData = updated.map((v) {
+        final cacheMap = Map<String, dynamic>.from(v);
+        cacheMap.remove('seedVideo');
+        return cacheMap;
+      }).toList();
+      await cacheBox.put(currentSearchQuery, cacheData);
+    } catch (_) {}
   } finally {
     ytClient.close();
   }
