@@ -116,7 +116,13 @@ class ShortsPlayerPool {
       slot.reset();
     }
 
-    // 4. Trigger asynchronous loading/playback updates for the mapped targets (Non-blocking)
+    // 4. Log warmup target reuse hits/misses
+    for (final target in targets) {
+      final videoId = videos[target]['id'] as String;
+      debugPrint("[POOL] target $target — ${ownsVideo(videoId) ? 'HIT reuse' : 'MISS recycle'} for $videoId");
+    }
+
+    // 5. Trigger asynchronous loading/playback updates for the mapped targets (Non-blocking)
     for (final target in targets) {
       final slot = mappedSlots[target]!;
       final videoId = slot.videoId!;
@@ -132,14 +138,27 @@ class ShortsPlayerPool {
     }
   }
 
+  bool ownsVideo(String videoId) {
+    return _slots.any((s) => 
+      s.videoId == videoId && 
+      s.isReady && 
+      s.hasFirstFrame && 
+      s.error == null
+    );
+  }
+
   void _activateSlot(ShortsPoolSlot slot, String videoId, DateTime startTime) {
-    if (slot.isReady) {
-      debugPrint("[POOL] play active for index ${slot.index} (immediate cache/warm play)");
+    if (slot.isReady && 
+        slot.videoId == videoId && 
+        slot.hasFirstFrame && 
+        slot.error == null) {
+      debugPrint("[POOL] HIT reuse — instant play for $videoId");
       slot.player.play();
       isShortsPlaying.value = true;
       activeShortsPlayer.value = slot.player;
       activeShortsVideoController.value = slot.controller;
     } else {
+      debugPrint("[POOL] MISS recycle — reloading for $videoId (isReady: ${slot.isReady}, videoMatch: ${slot.videoId == videoId}, hasFirstFrame: ${slot.hasFirstFrame}, error: ${slot.error})");
       _loadMediaInSlot(slot, videoId, playAfterLoad: true, startTime: startTime);
     }
   }
