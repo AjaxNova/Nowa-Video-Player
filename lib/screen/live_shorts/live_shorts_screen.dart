@@ -16,12 +16,24 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   late final ShortsFeedController _controller;
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
+  int _pendingSettledIndex = 0;
 
   @override
   void initState() {
     super.initState();
     _controller = ShortsFeedController();
     _controller.addListener(_onControllerChanged);
+
+    // Bind to the global tab listener to synchronize visibility
+    isShortsTabActive.addListener(_onTabActiveChanged);
+    // Sync initial state
+    _controller.pool.setVisible(isShortsTabActive.value);
+  }
+
+  void _onTabActiveChanged() {
+    if (mounted) {
+      _controller.pool.setVisible(isShortsTabActive.value);
+    }
   }
 
   void _onControllerChanged() {
@@ -33,6 +45,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
+    isShortsTabActive.removeListener(_onTabActiveChanged);
     _controller.dispose();
     _searchController.dispose();
     super.dispose();
@@ -545,11 +558,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                   } else if (notification is ScrollEndNotification) {
                     isShortsScrolling.value = false;
                     // Commit active index only when scroll ends (settles)
-                    final page = _controller.pageController.page;
-                    if (page != null) {
-                      final settledIndex = page.round();
-                      _controller.setFocusedIndex(settledIndex);
-                    }
+                    _controller.setFocusedIndex(_pendingSettledIndex);
                   }
                   return true;
                 },
@@ -560,6 +569,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                   physics: const FastShortsPagePhysics(parent: ClampingScrollPhysics()),
                   itemCount: _controller.videos.length,
                   onPageChanged: (index) {
+                    _pendingSettledIndex = index;
                     // Trigger prefetch refill when getting close to end
                     if (index >= _controller.videos.length - 5) {
                       prefetchYouTubeShorts(limit: 10, append: true);

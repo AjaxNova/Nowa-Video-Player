@@ -5,20 +5,41 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'shorts_stream_cache.dart';
 
-class ShortsPoolSlot {
+class ShortsPoolSlot extends ChangeNotifier {
   final Player player;
   final VideoController controller;
   
   int? index;
   String? videoId;
   int generation = 0;
-  bool isReady = false;
-  bool hasFirstFrame = false;
-  String? error;
+  
+  bool _isReady = false;
+  bool _hasFirstFrame = false;
+  String? _error;
+
+  bool get isReady => _isReady;
+  set isReady(bool val) {
+    if (_isReady == val) return;
+    _isReady = val;
+    notifyListeners();
+  }
+
+  bool get hasFirstFrame => _hasFirstFrame;
+  set hasFirstFrame(bool val) {
+    if (_hasFirstFrame == val) return;
+    _hasFirstFrame = val;
+    notifyListeners();
+  }
+
+  String? get error => _error;
+  set error(String? val) {
+    if (_error == val) return;
+    _error = val;
+    notifyListeners();
+  }
   
   StreamSubscription? _positionSub;
   StreamSubscription? _playingSub;
-  VoidCallback? onStateChanged;
 
   ShortsPoolSlot({
     required this.player,
@@ -36,15 +57,17 @@ class ShortsPoolSlot {
     index = null;
     videoId = null;
     generation++;
-    isReady = false;
-    hasFirstFrame = false;
-    error = null;
-    onStateChanged = null;
+    _isReady = false;
+    _hasFirstFrame = false;
+    _error = null;
+    notifyListeners();
   }
 
+  @override
   void dispose() {
     reset();
     player.dispose();
+    super.dispose();
   }
 }
 
@@ -53,6 +76,10 @@ class ShortsPlayerPool {
 
   final List<ShortsPoolSlot> _slots = [];
   bool _isDisposed = false;
+
+  bool isVisible = true;
+  bool userPaused = false;
+  int _activeIndex = 0;
 
   ShortsPlayerPool() {
     for (int i = 0; i < poolSize; i++) {
@@ -71,9 +98,56 @@ class ShortsPlayerPool {
     return null;
   }
 
+  void setVisible(bool visible) {
+    if (_isDisposed) return;
+    isVisible = visible;
+    debugPrint("[POOL] setVisible: $visible (activeIndex: $_activeIndex)");
+    if (!visible) {
+      for (final slot in _slots) {
+        slot.player.pause();
+      }
+      isShortsPlaying.value = false;
+    } else {
+      if (!userPaused) {
+        final activeSlot = getSlotForIndex(_activeIndex);
+        if (activeSlot != null && activeSlot.isReady) {
+          debugPrint("[POOL] Resuming active video on visible (index: $_activeIndex)");
+          activeSlot.player.play();
+          isShortsPlaying.value = true;
+          activeShortsPlayer.value = activeSlot.player;
+          activeShortsVideoController.value = activeSlot.controller;
+        }
+      }
+    }
+  }
+
+  void setUserPaused(bool paused) {
+    if (_isDisposed) return;
+    userPaused = paused;
+    debugPrint("[POOL] setUserPaused: $paused (isVisible: $isVisible)");
+    final activeSlot = getSlotForIndex(_activeIndex);
+    if (activeSlot != null) {
+      if (paused) {
+        activeSlot.player.pause();
+        isShortsPlaying.value = false;
+      } else {
+        if (isVisible) {
+          activeSlot.player.play();
+          isShortsPlaying.value = true;
+          activeShortsPlayer.value = activeSlot.player;
+          activeShortsVideoController.value = activeSlot.controller;
+        }
+      }
+    }
+  }
+
   void updateActiveIndex(int activeIndex, List<Map<String, dynamic>> videos) {
     if (_isDisposed || videos.isEmpty) return;
 
+    if (_activeIndex != activeIndex) {
+      userPaused = false;
+    }
+    _activeIndex = activeIndex;
     final startTime = DateTime.now();
     debugPrint("[POOL] assign index $activeIndex (total videos: ${videos.length})");
 
@@ -152,9 +226,14 @@ class ShortsPlayerPool {
         slot.videoId == videoId && 
         slot.hasFirstFrame && 
         slot.error == null) {
-      debugPrint("[POOL] HIT reuse — instant play for $videoId");
-      slot.player.play();
-      isShortsPlaying.value = true;
+      if (isVisible && !userPaused) {
+        debugPrint("[POOL] HIT reuse — instant play for $videoId");
+        slot.player.play();
+        isShortsPlaying.value = true;
+      } else {
+        debugPrint("[POOL] HIT reuse — ready but paused (visible: $isVisible, userPaused: $userPaused) for $videoId");
+        slot.player.pause();
+      }
       activeShortsPlayer.value = slot.player;
       activeShortsVideoController.value = slot.controller;
     } else {
@@ -186,7 +265,6 @@ class ShortsPlayerPool {
 
       if (streamUrl == null) {
         slot.error = "Video stream is not available.";
-        slot.onStateChanged?.call();
         return;
       }
 
@@ -208,7 +286,6 @@ class ShortsPlayerPool {
 
         if (!slot.hasFirstFrame && (hasPosition || hasSize)) {
           slot.hasFirstFrame = true;
-          slot.onStateChanged?.call();
           
           final elapsed = startTime != null ? DateTime.now().difference(startTime).inMilliseconds : -1;
           debugPrint("[POOL] first frame ready for video $videoId (render ready time: ${elapsed}ms)");
@@ -223,12 +300,16 @@ class ShortsPlayerPool {
       });
 
       slot.isReady = true;
-      slot.onStateChanged?.call();
 
       if (playAfterLoad) {
-        debugPrint("[POOL] play active for index ${slot.index} (play triggered after load completion)");
-        slot.player.play();
-        isShortsPlaying.value = true;
+        if (isVisible && !userPaused) {
+          debugPrint("[POOL] play active for index ${slot.index} (play triggered after load completion)");
+          slot.player.play();
+          isShortsPlaying.value = true;
+        } else {
+          debugPrint("[POOL] load completed but paused (visible: $isVisible, userPaused: $userPaused) for index ${slot.index}");
+          slot.player.pause();
+        }
         activeShortsPlayer.value = slot.player;
         activeShortsVideoController.value = slot.controller;
       } else {
@@ -238,7 +319,6 @@ class ShortsPlayerPool {
       debugPrint("[POOL] Error loading video in slot: $e");
       if (slot.generation == startGen && !_isDisposed) {
         slot.error = "Failed to load stream. Tap to retry.";
-        slot.onStateChanged?.call();
       }
     }
   }
