@@ -52,6 +52,7 @@ class ShortsFeedController extends ChangeNotifier {
   }
 
   void setFocusedIndex(int index) {
+    if (index < 0 || index >= _videos.length) return;
     if (_focusedIndex == index) return;
     _focusedIndex = index;
     notifyListeners();
