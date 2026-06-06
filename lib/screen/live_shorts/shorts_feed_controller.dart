@@ -5,6 +5,7 @@ import 'shorts_player_pool.dart';
 
 class ShortsFeedController extends ChangeNotifier {
   List<Map<String, dynamic>> _videos = [];
+  List<Map<String, dynamic>> _originalFeed = [];
   int _focusedIndex = 0;
   String _currentSort = 'Default';
   bool _isLoading = true;
@@ -28,7 +29,8 @@ class ShortsFeedController extends ChangeNotifier {
 
   void _initializeFeed() {
     if (globalYouTubeShorts.value.isNotEmpty) {
-      _videos = List.from(globalYouTubeShorts.value);
+      _originalFeed = List.from(globalYouTubeShorts.value);
+      _videos = List.from(_originalFeed);
       _isLoading = false;
       // Pre-warm the cache and pool players
       ShortsStreamCache.instance.warmUpAround(0, _videos);
@@ -42,9 +44,12 @@ class ShortsFeedController extends ChangeNotifier {
   void _onGlobalShortsChanged() {
     if (_isSorting) return; // don't overwrite while sort is in progress
     final savedIndex = _focusedIndex;
-    _videos = List.from(globalYouTubeShorts.value);
+    _originalFeed = List.from(globalYouTubeShorts.value);
     if (_currentSort != 'Default') {
+      _videos = List.from(_originalFeed);
       _applySortLocal(_currentSort);
+    } else {
+      _videos = List.from(_originalFeed);
     }
     notifyListeners();
 
@@ -81,9 +86,12 @@ class ShortsFeedController extends ChangeNotifier {
 
     await prefetchYouTubeShorts(limit: 10);
     
-    _videos = List.from(globalYouTubeShorts.value);
+    _originalFeed = List.from(globalYouTubeShorts.value);
     if (_currentSort != 'Default') {
+      _videos = List.from(_originalFeed);
       _applySortLocal(_currentSort);
+    } else {
+      _videos = List.from(_originalFeed);
     }
     _isLoading = globalYouTubeShorts.value.isEmpty;
     _errorMessage = youtubeShortsError;
@@ -101,9 +109,9 @@ class ShortsFeedController extends ChangeNotifier {
     _currentSort = sortType;
 
     if (sortType == 'Default') {
-      _videos = List.from(globalYouTubeShorts.value);
+      _videos = List.from(_originalFeed);
     } else {
-      _videos = List.from(globalYouTubeShorts.value);
+      _videos = List.from(_originalFeed);
       _applySortLocal(sortType);
     }
 
@@ -145,6 +153,18 @@ class ShortsFeedController extends ChangeNotifier {
           final aDur = a['duration'] as num? ?? 0;
           final bDur = b['duration'] as num? ?? 0;
           return bDur.compareTo(aDur);
+        case 'Most Viewed':
+          final aViews = a['view_count'] as num? ?? 0;
+          final bViews = b['view_count'] as num? ?? 0;
+          return bViews.compareTo(aViews);
+        case 'Most Liked':
+          final aLikes = a['like_count'] as num? ?? 0;
+          final bLikes = b['like_count'] as num? ?? 0;
+          return bLikes.compareTo(aLikes);
+        case 'Most Commented':
+          final aComments = a['comment_count'] as num? ?? 0;
+          final bComments = b['comment_count'] as num? ?? 0;
+          return bComments.compareTo(aComments);
         default:
           return 0;
       }
@@ -154,13 +174,15 @@ class ShortsFeedController extends ChangeNotifier {
   Future<void> triggerNewSearch(String query) async {
     _isLoading = true;
     _videos = [];
+    _originalFeed = [];
     _errorMessage = null;
     _focusedIndex = 0;
     notifyListeners();
 
     await prefetchYouTubeShorts(limit: 10, query: query, force: true);
 
-    _videos = List.from(globalYouTubeShorts.value);
+    _originalFeed = List.from(globalYouTubeShorts.value);
+    _videos = List.from(_originalFeed);
     _isLoading = globalYouTubeShorts.value.isEmpty;
     _errorMessage = youtubeShortsError;
     notifyListeners();

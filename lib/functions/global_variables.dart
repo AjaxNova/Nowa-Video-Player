@@ -12,6 +12,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
 
 import 'new_playlist_class.dart';
 import 'package:nova_videoplayer/functions/app_logger.dart';
+import 'package:nova_videoplayer/services/hosted_shorts_metadata_service.dart';
 
 Color colorBlack = Colors.black;
 Color colorWhite = Colors.white;
@@ -21,7 +22,8 @@ ValueNotifier<List<Map<String, dynamic>>> globalYouTubeShorts = ValueNotifier([]
 bool isYouTubeShortsLoading = false;
 String? youtubeShortsError;
 ValueNotifier<bool> isShortsPlaying = ValueNotifier(true);
-String currentSearchQuery = 'malayalam shorts';
+const String curatedFeedQuery = 'malayalam shorts';
+String currentSearchQuery = curatedFeedQuery;
 
 // Keep track of the last search page to fetch next page dynamically
 dynamic _lastSearchPage;
@@ -75,107 +77,18 @@ Future<void> prefetchYouTubeShorts({
   try {
     List<Map<String, dynamic>> newVideos = [];
 
-    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts') {
-      AppLogger.log('[Shorts] Loading default Malayalam curated feed from playlist: $curatedPlaylistId...');
+    if (currentSearchQuery.trim().toLowerCase() == curatedFeedQuery) {
+      AppLogger.log('[Shorts] Loading default Malayalam curated feed from hosted JSON...');
+      final service = HostedShortsMetadataService();
+      final fetchedVideos = await service.fetchShorts();
       
-      // Try fetching using YoutubeExplode first
-      List<yt.Video> videos = [];
-      try {
-        videos = await ytClient.playlists
-            .getVideos(curatedPlaylistId)
-            .take(150)
-            .toList();
-      } catch (e) {
-        AppLogger.logWarning('[Shorts] YoutubeExplode playlist fetch failed: $e');
-      }
-
       final existingIds = globalYouTubeShorts.value
           .map((v) => v['id'] as String)
           .toSet();
-
-      if (videos.isNotEmpty) {
-        newVideos = videos
-            .where((v) => !existingIds.contains(v.id.value))
-            .map((v) => {
-              'id': v.id.value,
-              'title': v.title,
-              'thumbnail': 'https://img.youtube.com/vi/${v.id.value}/hqdefault.jpg',
-              'duration': v.duration?.inSeconds ?? 0,
-              'publish_date': v.uploadDate?.toIso8601String(),
-              'stream_url': null, // lazy fetched per video
-              'seedVideo': v,
-            })
-            .toList();
-      } else {
-        AppLogger.log('[Shorts] YoutubeExplode returned 0 videos. Trying InnerTube scraper fallback...');
-        try {
-          final url = Uri.parse('https://www.youtube.com/youtubei/v1/browse?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8');
-          final headers = {
-            'content-type': 'application/json',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36',
-          };
-          final body = json.encode({
-            "context": {
-              "client": {
-                "browserName": "Chrome",
-                "browserVersion": "105.0.0.0",
-                "clientFormFactor": "UNKNOWN_FORM_FACTOR",
-                "clientName": "WEB",
-                "clientVersion": "2.20220921.00.00"
-              }
-            },
-            "browseId": "VL$curatedPlaylistId"
-          });
-
-          final response = await http.post(url, headers: headers, body: body);
-          if (response.statusCode == 200) {
-            final data = json.decode(response.body);
-            final Set<String> seenIds = {};
-            final List<Map<String, dynamic>> parsedVideos = [];
-
-            void findKeys(dynamic obj) {
-              if (obj is Map) {
-                if (obj.containsKey('shortsLockupViewModel')) {
-                  final model = obj['shortsLockupViewModel'];
-                  final videoId = model['onTap']?['innertubeCommand']?['reelWatchEndpoint']?['videoId'] as String?;
-                  final title = model['overlayMetadata']?['primaryText']?['content'] as String? ?? model['accessibilityText'] as String? ?? '';
-                  final thumbnails = model['thumbnailViewModel']?['thumbnailViewModel']?['image']?['sources'] as List?;
-                  final thumbnailUrl = thumbnails != null && thumbnails.isNotEmpty ? thumbnails.first['url'] as String? : null;
-
-                  if (videoId != null && videoId.isNotEmpty && !seenIds.contains(videoId)) {
-                    seenIds.add(videoId);
-                    parsedVideos.add({
-                      'id': videoId,
-                      'title': title,
-                      'thumbnail': 'https://img.youtube.com/vi/$videoId/hqdefault.jpg',
-                      'duration': 0,
-                      'publish_date': null,
-                      'stream_url': null,
-                      'seedVideo': null,
-                    });
-                  }
-                } else {
-                  for (var val in obj.values) {
-                    findKeys(val);
-                  }
-                }
-              } else if (obj is List) {
-                for (var val in obj) {
-                  findKeys(val);
-                }
-              }
-            }
-
-            findKeys(data);
-            newVideos = parsedVideos.where((v) => !existingIds.contains(v['id'])).toList();
-            AppLogger.log('[Shorts] InnerTube scraper parsed ${newVideos.length} new videos from curated playlist.');
-          } else {
-            AppLogger.logWarning('[Shorts] InnerTube browse failed: ${response.statusCode}');
-          }
-        } catch (innerErr, stack) {
-          AppLogger.logError('[Shorts] InnerTube scraper failed', innerErr, stack);
-        }
-      }
+          
+      newVideos = fetchedVideos
+          .where((v) => !existingIds.contains(v['id']))
+          .toList();
     } else {
       AppLogger.log('[Shorts] Searching YouTube for "$currentSearchQuery"...');
       if (_cachedSearchQuery != currentSearchQuery || _cachedSearchResults.isEmpty) {

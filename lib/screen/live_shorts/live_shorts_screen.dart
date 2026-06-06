@@ -90,58 +90,75 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
             border: Border.all(color: Colors.white10),
           ),
           padding: EdgeInsets.symmetric(horizontal: 24.w, vertical: 20.h),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40.w,
-                  height: 4.h,
-                  margin: EdgeInsets.only(bottom: 20.h),
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2.r),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40.w,
+                    height: 4.h,
+                    margin: EdgeInsets.only(bottom: 20.h),
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2.r),
+                    ),
                   ),
                 ),
-              ),
-              Text(
-                "Sort Feed By",
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 18.sp,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
+                Text(
+                  "Sort Feed By",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18.sp,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              ),
-              SizedBox(height: 16.h),
-              _buildSortOptionItem(
-                title: "Default (Relevance)",
-                icon: Icons.auto_awesome_rounded,
-                value: "Default",
-              ),
-              _buildSortOptionItem(
-                title: "Newest First",
-                icon: Icons.arrow_downward_rounded,
-                value: "Newest",
-              ),
-              _buildSortOptionItem(
-                title: "Oldest First",
-                icon: Icons.arrow_upward_rounded,
-                value: "Oldest",
-              ),
-              _buildSortOptionItem(
-                title: "Shortest Duration",
-                icon: Icons.hourglass_top_rounded,
-                value: "Shortest",
-              ),
-              _buildSortOptionItem(
-                title: "Longest Duration",
-                icon: Icons.hourglass_bottom_rounded,
-                value: "Longest",
-              ),
-              SizedBox(height: 12.h),
-            ],
+                SizedBox(height: 16.h),
+                _buildSortOptionItem(
+                  title: "Default (Relevance)",
+                  icon: Icons.auto_awesome_rounded,
+                  value: "Default",
+                ),
+                _buildSortOptionItem(
+                  title: "Newest First",
+                  icon: Icons.arrow_downward_rounded,
+                  value: "Newest",
+                ),
+                _buildSortOptionItem(
+                  title: "Oldest First",
+                  icon: Icons.arrow_upward_rounded,
+                  value: "Oldest",
+                ),
+                _buildSortOptionItem(
+                  title: "Shortest Duration",
+                  icon: Icons.hourglass_top_rounded,
+                  value: "Shortest",
+                ),
+                _buildSortOptionItem(
+                  title: "Longest Duration",
+                  icon: Icons.hourglass_bottom_rounded,
+                  value: "Longest",
+                ),
+                _buildSortOptionItem(
+                  title: "Most Viewed",
+                  icon: Icons.visibility_rounded,
+                  value: "Most Viewed",
+                ),
+                _buildSortOptionItem(
+                  title: "Most Liked",
+                  icon: Icons.favorite_rounded,
+                  value: "Most Liked",
+                ),
+                _buildSortOptionItem(
+                  title: "Most Commented",
+                  icon: Icons.comment_rounded,
+                  value: "Most Commented",
+                ),
+                SizedBox(height: 12.h),
+              ],
+            ),
           ),
         );
       },
@@ -235,6 +252,12 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     final seconds = durationSecs % 60;
     final durationText = durationSecs > 0 ? "$minutes:${seconds.toString().padLeft(2, '0')}" : 'N/A';
 
+    final author = currentVideo['author'] ?? 'N/A';
+    final viewCount = currentVideo['view_count'];
+    final likeCount = currentVideo['like_count'];
+    final viewsText = viewCount != null ? viewCount.toString() : 'N/A';
+    final likesText = likeCount != null ? likeCount.toString() : 'N/A';
+
     showDialog(
       context: context,
       builder: (context) {
@@ -257,8 +280,11 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
             children: [
               _infoRow("Title:", title),
               _infoRow("ID:", id),
+              _infoRow("Author:", author),
               _infoRow("Duration:", durationText),
               _infoRow("Upload Date:", formattedDate),
+              _infoRow("Views:", viewsText),
+              _infoRow("Likes:", likesText),
             ],
           ),
           actions: [
