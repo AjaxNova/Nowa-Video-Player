@@ -222,6 +222,10 @@ class ShortsPlayerPool {
   }
 
   void _activateSlot(ShortsPoolSlot slot, String videoId, DateTime startTime) {
+    // Pause all other slots first — only one video plays at a time
+    for (final s in _slots) {
+      if (s != slot) s.player.pause();
+    }
     if (slot.isReady && 
         slot.videoId == videoId && 
         slot.hasFirstFrame && 
