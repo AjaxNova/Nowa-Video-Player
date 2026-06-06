@@ -46,6 +46,7 @@ Future<void> prefetchYouTubeShorts({
   bool append = false,
   String? query,
   bool force = false,
+  Duration? timeout,
 }) async {
   if (isYouTubeShortsLoading && !force) return;
 
@@ -80,7 +81,9 @@ Future<void> prefetchYouTubeShorts({
     if (currentSearchQuery.trim().toLowerCase() == curatedFeedQuery) {
       AppLogger.log('[Shorts] Loading default Malayalam curated feed from hosted JSON...');
       final service = HostedShortsMetadataService();
-      final fetchedVideos = await service.fetchShorts();
+      final fetchedVideos = await service.fetchShorts(
+        timeout: timeout ?? const Duration(seconds: 8),
+      );
       
       final existingIds = globalYouTubeShorts.value
           .map((v) => v['id'] as String)

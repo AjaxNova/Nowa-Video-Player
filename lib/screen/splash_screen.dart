@@ -121,7 +121,20 @@ class _SplashScreenState extends State<SplashScreen> {
               ),
             ),
             SizedBox(height: 20.h),
-            if (isLoading) const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)),
+            if (isLoading)
+              const CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white))
+            else if (globalYouTubeShorts.value.isEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 10.h),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                  ),
+                  onPressed: () => fetchvideos(),
+                  child: const Text('Retry Loading Feed'),
+                ),
+              ),
             SizedBox(height: 10.h),
             Text(statusMessage, style: TextStyle(fontFamily: "Inter", fontSize: 14.sp, color: Colors.white70)),
             SizedBox(height: 60.h),
@@ -147,7 +160,7 @@ class _SplashScreenState extends State<SplashScreen> {
       
       if (mounted) {
         setState(() {
-          allFolderswithVideos = provider.allFoldersList ?? [];
+          allFolderswithVideos = provider.allFoldersList;
           allVideosList = provider.allVideosList;
           statusMessage = "Optimizing your Shorts Feed...";
         });
@@ -157,28 +170,29 @@ class _SplashScreenState extends State<SplashScreen> {
 
         setState(() {
           statusMessage = "Loading YouTube Shorts Feed...";
+          isLoading = true;
         });
         
-        // Start prefetching
-        prefetchYouTubeShorts(limit: 10);
+        // Start prefetching and await the result with a maximum 8s timeout
+        await prefetchYouTubeShorts(limit: 10, timeout: const Duration(seconds: 8));
 
-        // Wait up to 4 seconds for either cache to load instantly or at least 3 videos to resolve
-        int elapsedMs = 0;
-        while (globalYouTubeShorts.value.length < 3 && elapsedMs < 4000) {
-          await Future.delayed(const Duration(milliseconds: 100));
-          elapsedMs += 100;
-        }
+        if (globalYouTubeShorts.value.isNotEmpty) {
+          setState(() {
+            statusMessage = "Welcome to NOWA Player!";
+            isLoading = false;
+          });
 
-        setState(() {
-          statusMessage = "Welcome to NOWA Player!";
-          isLoading = false;
-        });
-
-        // Slight cinematic pause so the user sees the "Welcome!" message briefly
-        await Future.delayed(const Duration(milliseconds: 600));
-        
-        if (mounted) {
-          gotoHome();
+          // Slight cinematic pause so the user sees the "Welcome!" message briefly
+          await Future.delayed(const Duration(milliseconds: 600));
+          
+          if (mounted) {
+            gotoHome();
+          }
+        } else {
+          setState(() {
+            statusMessage = "Could not load feed. Please check your connection.";
+            isLoading = false;
+          });
         }
       }
 
