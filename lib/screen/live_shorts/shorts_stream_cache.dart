@@ -93,19 +93,33 @@ class ShortsStreamCache {
   }
 
   Future<String?> _resolveStreamUrl(String videoId) async {
-    try {
-      final manifest = await _ytClient.videos.streams.getManifest(
-        videoId,
-        ytClients: [yt.YoutubeApiClient.androidVr],
-      );
-      final muxed = manifest.muxed.sortByVideoQuality();
-      if (muxed.isNotEmpty) {
-        return muxed.first.url.toString();
+    // Try androidVr first (fastest, least rate limited)
+    // Fall back to other clients if it fails
+    final clientsToTry = [
+      yt.YoutubeApiClient.androidVr,
+      yt.YoutubeApiClient.android,
+      yt.YoutubeApiClient.ios,
+    ];
+
+    for (final client in clientsToTry) {
+      try {
+        final manifest = await _ytClient.videos.streams.getManifest(
+          videoId,
+          ytClients: [client],
+        );
+        final muxed = manifest.muxed.sortByVideoQuality();
+        if (muxed.isNotEmpty) {
+          debugPrint("🚀 [ShortsCache] Stream resolved via ${client.toString()} for $videoId");
+          return muxed.first.url.toString();
+        }
+      } catch (e) {
+        debugPrint("🚀 [ShortsCache] Client ${client.toString()} failed for $videoId: $e. Trying next...");
+        continue;
       }
-    } catch (e) {
-      debugPrint("🚀 [ShortsCache] _resolveStreamUrl error for video $videoId: $e");
-      rethrow;
     }
+
+    // All clients failed
+    debugPrint("🚀 [ShortsCache] All clients failed for $videoId");
     return null;
   }
 
