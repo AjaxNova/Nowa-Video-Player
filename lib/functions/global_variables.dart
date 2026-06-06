@@ -31,7 +31,6 @@ int _fetchVersion = 0; // Incremented on new search to cancel stale fetches
 bool _isRelatedFeedRunning = false;
 final Set<String> _usedSeedIds = {};
 int _curatedUploadsOffset = 40;
-bool _hasRunMetadataFetcherThisSession = false;
 
 /// Fetches YouTube shorts lazily.
 /// - [limit]: how many new streams to extract
@@ -229,92 +228,10 @@ Future<void> prefetchYouTubeShorts({
       isYouTubeShortsLoading = false;
     }
     ytClient.close();
-    if (currentSearchQuery.trim().toLowerCase() == 'malayalam shorts' &&
-        globalYouTubeShorts.value.isNotEmpty &&
-        !append &&
-        !_hasRunMetadataFetcherThisSession) {
-      _hasRunMetadataFetcherThisSession = true;
-      _startBackgroundMetadataFetcher();
-    }
   }
 }
 
-bool _isMetadataFetcherRunning = false;
 
-Future<void> _fetchVideoMetadataInBackground(String videoId) async {
-  final ytClient = yt.YoutubeExplode();
-  try {
-    final video = await ytClient.videos.get(videoId);
-    final updated = globalYouTubeShorts.value.map((v) {
-      if (v['id'] == videoId) {
-        return {
-          ...v,
-          'duration': video.duration?.inSeconds ?? 0,
-          'publish_date': video.publishDate?.toIso8601String() ?? video.uploadDate?.toIso8601String(),
-          'author': video.author,
-          'view_count': video.engagement.viewCount,
-          'like_count': video.engagement.likeCount,
-        };
-      }
-      return v;
-    }).toList();
-    globalYouTubeShorts.value = updated;
-    try {
-      final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
-      final cacheData = updated.map((v) {
-        final cacheMap = Map<String, dynamic>.from(v);
-        cacheMap.remove('seedVideo');
-        return cacheMap;
-      }).toList();
-      await cacheBox.put(currentSearchQuery, cacheData);
-    } catch (_) {}
-  } catch (e) {
-    AppLogger.logWarning('[Shorts] Metadata fetch failed for $videoId: $e');
-    // Set duration to -1 so we don't try this failing video again in this run
-    final updated = globalYouTubeShorts.value.map((v) {
-      if (v['id'] == videoId) {
-        return {
-          ...v,
-          'duration': -1,
-        };
-      }
-      return v;
-    }).toList();
-    globalYouTubeShorts.value = updated;
-    try {
-      final cacheBox = await Hive.openBox('cachedYouTubeShortsBox');
-      final cacheData = updated.map((v) {
-        final cacheMap = Map<String, dynamic>.from(v);
-        cacheMap.remove('seedVideo');
-        return cacheMap;
-      }).toList();
-      await cacheBox.put(currentSearchQuery, cacheData);
-    } catch (_) {}
-  } finally {
-    ytClient.close();
-  }
-}
-
-Future<void> _startBackgroundMetadataFetcher() async {
-  if (_isMetadataFetcherRunning) return;
-  _isMetadataFetcherRunning = true;
-
-  try {
-    final List<String> videoIds = globalYouTubeShorts.value
-        .where((v) => (v['duration'] as num? ?? 0) == 0)
-        .map((v) => v['id'] as String)
-        .toList();
-
-    for (final id in videoIds) {
-      await _fetchVideoMetadataInBackground(id);
-      await Future.delayed(const Duration(milliseconds: 1000));
-    }
-  } catch (e) {
-    AppLogger.logWarning('[Shorts] Background metadata fetcher error: $e');
-  } finally {
-    _isMetadataFetcherRunning = false;
-  }
-}
 
 /// Streams related videos one-by-one into the feed as each resolves.
 /// Call this after the first batch is loaded. Fire and forget.

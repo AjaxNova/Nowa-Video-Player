@@ -235,12 +235,6 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     final seconds = durationSecs % 60;
     final durationText = durationSecs > 0 ? "$minutes:${seconds.toString().padLeft(2, '0')}" : 'N/A';
 
-    final author = currentVideo['author'] ?? 'N/A';
-    final viewCount = currentVideo['view_count'];
-    final likeCount = currentVideo['like_count'];
-    final viewsText = viewCount != null ? viewCount.toString() : 'N/A';
-    final likesText = likeCount != null ? likeCount.toString() : 'N/A';
-
     showDialog(
       context: context,
       builder: (context) {
@@ -263,11 +257,8 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
             children: [
               _infoRow("Title:", title),
               _infoRow("ID:", id),
-              _infoRow("Author:", author),
               _infoRow("Duration:", durationText),
               _infoRow("Upload Date:", formattedDate),
-              _infoRow("Views:", viewsText),
-              _infoRow("Likes:", likesText),
             ],
           ),
           actions: [
@@ -614,64 +605,57 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
               Positioned.fill(
                 child: IgnorePointer(
                   ignoring: !_showSortOverlay,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 250),
-                    child: _showSortOverlay
-                        ? Container(
-                            key: const ValueKey('sort_overlay_active'),
-                            color: Colors.black.withValues(alpha: 0.88),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  padding: EdgeInsets.all(20.r),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.05),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: colorGreen.withValues(alpha: 0.3),
-                                      width: 1,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    Icons.tune_rounded,
-                                    color: colorGreen,
-                                    size: 36.sp,
-                                  ),
-                                ),
-                                SizedBox(height: 20.h),
-                                Text(
-                                  'Sorting by',
-                                  style: TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 12.sp,
-                                    letterSpacing: 1.2,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                SizedBox(height: 6.h),
-                                Text(
-                                  _sortOverlayLabel,
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 20.sp,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.3,
-                                  ),
-                                ),
-                                SizedBox(height: 24.h),
-                                SizedBox(
-                                  width: 24.w,
-                                  height: 24.w,
-                                  child: CircularProgressIndicator(
-                                    color: colorGreen,
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                              ],
+                  child: Visibility(
+                    visible: _showSortOverlay,
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.92),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: EdgeInsets.all(20.r),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: colorGreen.withValues(alpha: 0.3),
+                                width: 1,
+                              ),
                             ),
-                          )
-                        : const SizedBox.shrink(key: ValueKey('sort_overlay_inactive')),
+                            child: Icon(Icons.tune_rounded, color: colorGreen, size: 36.sp),
+                          ),
+                          SizedBox(height: 20.h),
+                          Text(
+                            'Sorting by',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12.sp,
+                              letterSpacing: 1.2,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 6.h),
+                          Text(
+                            _sortOverlayLabel,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20.sp,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          SizedBox(height: 24.h),
+                          SizedBox(
+                            width: 24.w,
+                            height: 24.w,
+                            child: CircularProgressIndicator(
+                              color: colorGreen,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),

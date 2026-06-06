@@ -50,7 +50,14 @@ class _ShortsPlayerTileState extends State<ShortsPlayerTile> {
               (instance) {
                 instance.onLongPressStart = (details) {
                   final screenWidth = MediaQuery.of(context).size.width;
-                  if (details.localPosition.dx > screenWidth / 2) {
+                  final screenHeight = MediaQuery.of(context).size.height;
+                  
+                  // Centre-right zone: right 30% of width, middle 40% of height
+                  final inRightZone = details.localPosition.dx > screenWidth * 0.70;
+                  final inVerticalCentre = details.localPosition.dy > screenHeight * 0.30 &&
+                                            details.localPosition.dy < screenHeight * 0.70;
+                  
+                  if (inRightZone && inVerticalCentre) {
                     slot.player.setRate(2.0);
                     setState(() => isTurboMode = true);
                   }
@@ -256,7 +263,7 @@ class _StationaryLongPressRecognizer extends LongPressGestureRecognizer {
   void handleEvent(PointerEvent event) {
     if (_downPosition != null && event is PointerMoveEvent) {
       final distance = (event.position - _downPosition!).distance;
-      if (distance > 8.0) {
+      if (distance > 18.0) {
         resolve(GestureDisposition.rejected);
         _downPosition = null;
         return;
