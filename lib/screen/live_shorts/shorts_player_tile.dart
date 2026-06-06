@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -41,26 +42,37 @@ class _ShortsPlayerTileState extends State<ShortsPlayerTile> {
         final isPlayerReady = slot.isReady;
         final error = slot.error;
 
-        return GestureDetector(
+        return RawGestureDetector(
           behavior: HitTestBehavior.translucent,
-          onLongPressStart: (details) {
-            final screenWidth = MediaQuery.of(context).size.width;
-            if (details.localPosition.dx > screenWidth / 2) {
-              slot.player.setRate(2.0);
-              setState(() => isTurboMode = true);
-            }
-          },
-          onLongPressEnd: (details) {
-            slot.player.setRate(1.0);
-            setState(() => isTurboMode = false);
-          },
-          onTap: () {
-            // Coordinate manual pause state with pool-wide lock
-            if (slot.player.state.playing) {
-              widget.pool.setUserPaused(true);
-            } else {
-              widget.pool.setUserPaused(false);
-            }
+          gestures: {
+            _StationaryLongPressRecognizer: GestureRecognizerFactoryWithHandlers<_StationaryLongPressRecognizer>(
+              () => _StationaryLongPressRecognizer(),
+              (instance) {
+                instance.onLongPressStart = (details) {
+                  final screenWidth = MediaQuery.of(context).size.width;
+                  if (details.localPosition.dx > screenWidth / 2) {
+                    slot.player.setRate(2.0);
+                    setState(() => isTurboMode = true);
+                  }
+                };
+                instance.onLongPressEnd = (_) {
+                  slot.player.setRate(1.0);
+                  setState(() => isTurboMode = false);
+                };
+              },
+            ),
+            TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+              () => TapGestureRecognizer(),
+              (instance) {
+                instance.onTap = () {
+                  if (slot.player.state.playing) {
+                    widget.pool.setUserPaused(true);
+                  } else {
+                    widget.pool.setUserPaused(false);
+                  }
+                };
+              },
+            ),
           },
           child: Container(
             color: Colors.black,
@@ -226,5 +238,30 @@ class _ShortsPlayerTileState extends State<ShortsPlayerTile> {
         ],
       ),
     );
+  }
+}
+
+class _StationaryLongPressRecognizer extends LongPressGestureRecognizer {
+  Offset? _downPosition;
+
+  _StationaryLongPressRecognizer() : super(duration: const Duration(milliseconds: 500));
+
+  @override
+  void addPointer(PointerDownEvent event) {
+    _downPosition = event.position;
+    super.addPointer(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (_downPosition != null && event is PointerMoveEvent) {
+      final distance = (event.position - _downPosition!).distance;
+      if (distance > 8.0) {
+        resolve(GestureDisposition.rejected);
+        _downPosition = null;
+        return;
+      }
+    }
+    super.handleEvent(event);
   }
 }
