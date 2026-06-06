@@ -12,6 +12,7 @@ class ShortsFeedController extends ChangeNotifier {
 
   final PageController pageController = PageController();
   late final ShortsPlayerPool pool;
+  bool _isSorting = false;
 
   List<Map<String, dynamic>> get videos => _videos;
   int get focusedIndex => _focusedIndex;
@@ -39,6 +40,7 @@ class ShortsFeedController extends ChangeNotifier {
   }
 
   void _onGlobalShortsChanged() {
+    if (_isSorting) return; // don't overwrite while sort is in progress
     final savedIndex = _focusedIndex;
     _videos = List.from(globalYouTubeShorts.value);
     if (_currentSort != 'Default') {
@@ -95,6 +97,7 @@ class ShortsFeedController extends ChangeNotifier {
   }
 
   Future<void> setSort(String sortType) async {
+    _isSorting = true; // block _onGlobalShortsChanged from overwriting
     _currentSort = sortType;
 
     if (sortType == 'Default') {
@@ -119,6 +122,7 @@ class ShortsFeedController extends ChangeNotifier {
         ShortsStreamCache.instance.warmUpAround(0, _videos);
         pool.updateActiveIndex(0, _videos);
       }
+      _isSorting = false; // unblock after pool reset
     });
   }
 

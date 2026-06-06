@@ -202,6 +202,9 @@ Future<void> prefetchYouTubeShorts({
           .toList();
     }
 
+    AppLogger.log('[Shorts] Sample video metadata — duration: ${newVideos.isNotEmpty ? newVideos.first['duration'] : 'N/A'}, publish_date: ${newVideos.isNotEmpty ? newVideos.first['publish_date'] : 'N/A'}');
+    AppLogger.log('[Shorts] Videos with real duration: ${newVideos.where((v) => (v['duration'] as num? ?? 0) > 0).length} / ${newVideos.length}');
+
     if (_fetchVersion != myVersion) return;
 
     if (newVideos.isNotEmpty) {
