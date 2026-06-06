@@ -94,16 +94,32 @@ class ShortsFeedController extends ChangeNotifier {
     }
   }
 
-  void setSort(String sortType) {
+  Future<void> setSort(String sortType) async {
     _currentSort = sortType;
+
     if (sortType == 'Default') {
       _videos = List.from(globalYouTubeShorts.value);
     } else {
+      _videos = List.from(globalYouTubeShorts.value);
       _applySortLocal(sortType);
     }
+
+    // Reset to index 0
+    _focusedIndex = 0;
     notifyListeners();
-    // Refresh pool targeting active sort changes
-    pool.updateActiveIndex(_focusedIndex, _videos);
+
+    // Reset PageView and pool to new index 0
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (pageController.hasClients) {
+        pageController.jumpToPage(0);
+      }
+      // Reset pool to load new index 0
+      pool.clear();
+      if (_videos.isNotEmpty) {
+        ShortsStreamCache.instance.warmUpAround(0, _videos);
+        pool.updateActiveIndex(0, _videos);
+      }
+    });
   }
 
   void _applySortLocal(String sortType) {

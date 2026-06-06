@@ -17,6 +17,8 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   int _pendingSettledIndex = 0;
+  bool _showSortOverlay = false;
+  String _sortOverlayLabel = '';
 
   @override
   void initState() {
@@ -115,17 +117,17 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
               SizedBox(height: 16.h),
               _buildSortOptionItem(
                 title: "Default (Relevance)",
-                icon: Icons.sort_rounded,
+                icon: Icons.auto_awesome_rounded,
                 value: "Default",
               ),
               _buildSortOptionItem(
                 title: "Newest First",
-                icon: Icons.calendar_today_rounded,
+                icon: Icons.arrow_downward_rounded,
                 value: "Newest",
               ),
               _buildSortOptionItem(
                 title: "Oldest First",
-                icon: Icons.history_rounded,
+                icon: Icons.arrow_upward_rounded,
                 value: "Oldest",
               ),
               _buildSortOptionItem(
@@ -158,9 +160,20 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   }) {
     final isSelected = _controller.currentSort == value;
     return InkWell(
-      onTap: () {
+      onTap: () async {
         Navigator.pop(context);
-        _controller.setSort(value);
+        // Show overlay first
+        setState(() {
+          _sortOverlayLabel = title; // e.g. "Newest First"
+          _showSortOverlay = true;
+        });
+        // Let overlay appear
+        await Future.delayed(const Duration(milliseconds: 120));
+        // Apply sort (resets pool + jumps to 0)
+        await _controller.setSort(value);
+        // Hold briefly then fade out
+        await Future.delayed(const Duration(milliseconds: 700));
+        if (mounted) setState(() => _showSortOverlay = false);
       },
       borderRadius: BorderRadius.circular(12.r),
       child: Container(
@@ -316,14 +329,22 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
                 SizedBox(width: 12.w),
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.black45,
+                    color: _controller.currentSort == 'Default'
+                        ? Colors.black45
+                        : colorGreen.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white10),
+                    border: Border.all(
+                      color: _controller.currentSort == 'Default'
+                          ? Colors.white10
+                          : colorGreen.withValues(alpha: 0.5),
+                    ),
                   ),
                   child: IconButton(
                     icon: Icon(
-                      _controller.currentSort == 'Default' ? Icons.filter_list_rounded : Icons.filter_list_off_rounded,
-                      color: _controller.currentSort == 'Default' ? Colors.white : colorGreen,
+                      Icons.tune_rounded, // same icon always, colour changes
+                      color: _controller.currentSort == 'Default'
+                          ? Colors.white
+                          : colorGreen,
                       size: 24.sp,
                     ),
                     onPressed: _showSortOptionsBottomSheet,
@@ -589,6 +610,67 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
               _buildActionButtons(),
               _buildSearchOverlay(),
               if (isYouTubeShortsLoading) _buildSubtleBottomLoader(),
+              // Sort overlay — full screen, sits above everything
+              if (_showSortOverlay)
+                Positioned.fill(
+                  child: AnimatedOpacity(
+                    opacity: _showSortOverlay ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 200),
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.88),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: EdgeInsets.all(20.r),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: colorGreen.withValues(alpha: 0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Icon(
+                              Icons.tune_rounded,
+                              color: colorGreen,
+                              size: 36.sp,
+                            ),
+                          ),
+                          SizedBox(height: 20.h),
+                          Text(
+                            'Sorting by',
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 12.sp,
+                              letterSpacing: 1.2,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 6.h),
+                          Text(
+                            _sortOverlayLabel,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 20.sp,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          SizedBox(height: 24.h),
+                          SizedBox(
+                            width: 24.w,
+                            height: 24.w,
+                            child: CircularProgressIndicator(
+                              color: colorGreen,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
