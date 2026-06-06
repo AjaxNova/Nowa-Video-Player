@@ -10,6 +10,7 @@ class ShortsStreamCache {
   final Map<String, Future<String?>> _cache = {};
   final Map<String, DateTime> _fetchTimes = {};
   final List<String> _cacheKeys = [];
+  final yt.YoutubeExplode _ytClient = yt.YoutubeExplode();
   
   static const int _maxCacheSize = 50;
   static const Duration _cacheTtl = Duration(hours: 5);
@@ -92,9 +93,8 @@ class ShortsStreamCache {
   }
 
   Future<String?> _resolveStreamUrl(String videoId) async {
-    final ytClient = yt.YoutubeExplode();
     try {
-      final manifest = await ytClient.videos.streams.getManifest(
+      final manifest = await _ytClient.videos.streams.getManifest(
         videoId,
         ytClients: [yt.YoutubeApiClient.androidVr],
       );
@@ -105,8 +105,6 @@ class ShortsStreamCache {
     } catch (e) {
       debugPrint("🚀 [ShortsCache] _resolveStreamUrl error for video $videoId: $e");
       rethrow;
-    } finally {
-      ytClient.close();
     }
     return null;
   }
@@ -126,6 +124,7 @@ class ShortsStreamCache {
 
   void dispose() {
     _debounceTimer?.cancel();
+    _ytClient.close();
     clear();
   }
 }
