@@ -12,6 +12,7 @@ import '../../../functions/history.dart';
 import '../../../functions/app_logger.dart';
 import '../../../settings/shorts_settings_screen.dart';
 import '../../../functions/file_operations.dart';
+import 'package:flutter/gestures.dart';
 
 class ShortsPageTry extends StatefulWidget {
   const ShortsPageTry({super.key, required this.shortVideos});
@@ -34,6 +35,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
   final Map<int, Player> _preloadedPlayers = {};
   final Map<int, VideoController> _preloadedControllers = {};
   final Map<int, File?> _preloadedFiles = {};
+  int _pendingIndex = 0;
 
   @override
   void initState() {
@@ -73,6 +75,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
     final controller = VideoController(player);
     // open but don't play
     await player.open(Media(file.path), play: false); 
+    await player.seek(Duration.zero); // force decoder to decode first frame
     
     if (!mounted) {
       player.dispose();
@@ -250,13 +253,17 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                     isShortsScrolling.value = true;
                   } else if (notification is ScrollEndNotification) {
                     isShortsScrolling.value = false;
+                    // Only update active index on finger release — same as live shorts
+                    if (_currentIndexNotifier.value != _pendingIndex) {
+                      _currentIndexNotifier.value = _pendingIndex;
+                    }
                   }
                   return true;
                 },
                 child: PageView.builder(
                   scrollDirection: Axis.vertical,
                   controller: _pageController,
-                  physics: const PageScrollPhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
+                  physics: const FastShortsPagePhysics(parent: ClampingScrollPhysics()), // snappy, no bounce
                   itemCount: _videos.length,
                   itemBuilder: (BuildContext context, int index) {
                     final isDeleting = index == _deletingIndex;
@@ -358,9 +365,10 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                     );
                   },
                   onPageChanged: (int pageIndex) {
-                    _currentIndexNotifier.value = pageIndex;
-                    _prefetchFiles(pageIndex);
-                    _preloadAdjacentVideos(pageIndex);
+                    _pendingIndex = pageIndex;       // store only — does NOT trigger playback
+                    _prefetchFiles(pageIndex);       // fine mid-drag — warms file cache
+                    _preloadAdjacentVideos(pageIndex); // fine mid-drag — preloads players
+                    // DO NOT update _currentIndexNotifier here
                   },
                 ),
               ),
@@ -518,7 +526,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     if (_player != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        if (_isActive && (isShortsTabActive.value || isShortsPiPMode.value)) {
+        if (_isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value)) {
           if (!_isManuallyPaused) {
             _player!.play();
           }
@@ -545,7 +553,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     if (_player != null) {
       _playingSub?.cancel();
       _completedSub?.cancel();
-      isShortsTabActive.removeListener(_syncPlayback);
+      isLocalShortsTabActive.removeListener(_syncPlayback);
       isShortsPiPMode.removeListener(_syncPlayback);
       isShortsAutoPlay.removeListener(_onAutoPlayChanged);
 
@@ -629,7 +637,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
       _videoController = VideoController(_player!);
 
       // Pass play argument directly based on active state to guarantee playback
-      bool shouldPlay = _isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
+      bool shouldPlay = _isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
       
       // Wrap native player opening in a hard 6-second timeout to prevent C++ thread blocks from freezing Dart
       await _player!.open(Media(file.path), play: shouldPlay).timeout(const Duration(seconds: 6));
@@ -650,7 +658,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         }
       });
 
-      isShortsTabActive.addListener(_syncPlayback);
+      isLocalShortsTabActive.addListener(_syncPlayback);
       isShortsPiPMode.addListener(_syncPlayback);
       isShortsAutoPlay.addListener(_onAutoPlayChanged);
 
@@ -740,7 +748,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         return;
       }
 
-      bool shouldPlay = _isActive && (isShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
+      bool shouldPlay = _isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
       
       if (shouldPlay) {
         _player!.play();
@@ -758,7 +766,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
         }
       });
 
-      isShortsTabActive.addListener(_syncPlayback);
+      isLocalShortsTabActive.addListener(_syncPlayback);
       isShortsPiPMode.addListener(_syncPlayback);
       isShortsAutoPlay.addListener(_onAutoPlayChanged);
 
@@ -1148,19 +1156,34 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                       } catch (_) {}
 
                       final scaffoldMessenger = ScaffoldMessenger.of(context);
-                      Navigator.pop(ctx);
+                      final navigator = Navigator.of(context);
+                      navigator.pop(ctx); // close confirmation sheet
+
+                      // Request MANAGE_EXTERNAL_STORAGE on first delete — silent after that
+                      await FileOperations.requestManageStoragePermission(context);
+                      if (!mounted) return;
+
+                      // Proceed with delete regardless — if permission denied,
+                      // deleteVideo falls back to MediaStore dialog automatically
                       final success = await FileOperations.deleteVideo(
                         context: context,
                         asset: widget.video,
                       );
+
                       if (success && mounted) {
                         widget.onVideoDeleted?.call(widget.video);
                       } else if (!success && mounted) {
                         scaffoldMessenger.showSnackBar(
                           SnackBar(
-                            content: Text('Could not delete video', style: TextStyle(fontSize: 12.sp)),
+                            content: Text(
+                              'Could not delete video',
+                              style: TextStyle(fontSize: 12.sp),
+                            ),
                             backgroundColor: const Color(0xFF1A0505),
                             behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8.r),
+                            ),
                           ),
                         );
                       }
@@ -1231,33 +1254,49 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     // If it's very different, use cover — fill the screen
     final BoxFit videoFit = (videoAR - screenAR).abs() < 0.1 ? BoxFit.contain : BoxFit.cover;
 
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent, // Allow instant recognition during snaps
-      onLongPressStart: (details) {
-        if (_player == null) return;
-        // Activate 2x speed only on the right half of the screen
-        final screenWidth = MediaQuery.of(context).size.width;
-        if (details.localPosition.dx > screenWidth / 2) {
-          _player!.setRate(2.0);
-          setState(() => isTurboMode = true);
-        }
-      },
-      onLongPressEnd: (details) {
-        if (_player == null) return;
-        _player!.setRate(1.0);
-        setState(() => isTurboMode = false);
-      },
-      onTap: () {
-        if (_player == null) return;
-        setState(() {
-          if (_isPlayingCache) {
-            _player!.pause();
-            _isManuallyPaused = true;
-          } else {
-            _player!.play();
-            _isManuallyPaused = false;
-          }
-        });
+    return RawGestureDetector(
+      behavior: HitTestBehavior.translucent,
+      gestures: {
+        _StationaryLongPressRecognizer: GestureRecognizerFactoryWithHandlers<_StationaryLongPressRecognizer>(
+          () => _StationaryLongPressRecognizer(),
+          (instance) {
+            instance.onLongPressStart = (details) {
+              if (_player == null) return;
+              final screenWidth = MediaQuery.of(context).size.width;
+              final screenHeight = MediaQuery.of(context).size.height;
+              // Centre-right zone: right 30% width, middle 40% height
+              final inRightZone = details.localPosition.dx > screenWidth * 0.70;
+              final inVerticalCentre = details.localPosition.dy > screenHeight * 0.30 &&
+                                       details.localPosition.dy < screenHeight * 0.70;
+              if (inRightZone && inVerticalCentre) {
+                _player!.setRate(2.0);
+                setState(() => isTurboMode = true);
+              }
+            };
+            instance.onLongPressEnd = (_) {
+              if (_player == null) return;
+              _player!.setRate(1.0);
+              setState(() => isTurboMode = false);
+            };
+          },
+        ),
+        TapGestureRecognizer: GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
+          () => TapGestureRecognizer(),
+          (instance) {
+            instance.onTap = () {
+              if (_player == null) return;
+              setState(() {
+                if (_isPlayingCache) {
+                  _player!.pause();
+                  _isManuallyPaused = true;
+                } else {
+                  _player!.play();
+                  _isManuallyPaused = false;
+                }
+              });
+            };
+          },
+        ),
       },
       child: Container(
         color: Colors.black,
@@ -1275,7 +1314,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
               Video(
                 controller: _videoController!,
                 controls: NoVideoControls,
-                fill: Colors.transparent,
+                fill: Colors.black,
                 fit: videoFit, // dynamically use contain or cover
               ),
 
@@ -1308,7 +1347,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                 ),
               ),
             // Playback Indicator
-            if (_isManuallyPaused && isShortsTabActive.value && !isTurboMode)
+            if (_isManuallyPaused && isLocalShortsTabActive.value && !isTurboMode)
               Center(
                 child: Container(
                   padding: const EdgeInsets.all(16),
@@ -2020,4 +2059,51 @@ class _GoogleFilesCleanAnimation extends StatelessWidget {
       },
     );
   }
+}
+
+class _StationaryLongPressRecognizer extends LongPressGestureRecognizer {
+  Offset? _downPosition;
+
+  _StationaryLongPressRecognizer() : super(duration: const Duration(milliseconds: 500));
+
+  @override
+  void addPointer(PointerDownEvent event) {
+    _downPosition = event.position;
+    super.addPointer(event);
+  }
+
+  @override
+  void handleEvent(PointerEvent event) {
+    if (_downPosition != null && event is PointerMoveEvent) {
+      final distance = (event.position - _downPosition!).distance;
+      if (distance > 18.0) {
+        resolve(GestureDisposition.rejected);
+        _downPosition = null;
+        return;
+      }
+    }
+    super.handleEvent(event);
+  }
+}
+
+class FastShortsPagePhysics extends PageScrollPhysics {
+  const FastShortsPagePhysics({super.parent});
+
+  @override
+  FastShortsPagePhysics applyTo(ScrollPhysics? ancestor) {
+    return FastShortsPagePhysics(parent: buildParent(ancestor));
+  }
+
+  @override
+  SpringDescription get spring => const SpringDescription(
+        mass: 0.45,
+        stiffness: 420,
+        damping: 32,
+      );
+
+  @override
+  Tolerance get tolerance => const Tolerance(
+        velocity: 1.0,
+        distance: 0.5,
+      );
 }

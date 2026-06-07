@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart' as yt;
+import 'package:nova_videoplayer/functions/app_logger.dart';
 
 class ShortsStreamCache {
   // Singleton pattern
@@ -23,15 +24,15 @@ class ShortsStreamCache {
     if (_cache.containsKey(videoId)) {
       final fetchTime = _fetchTimes[videoId];
       if (fetchTime != null && DateTime.now().difference(fetchTime) < _cacheTtl) {
-        debugPrint("🚀 [ShortsCache] Cache HIT for video: $videoId");
+        AppLogger.log("[ShortsCache] Cache HIT for video: $videoId");
         return _cache[videoId]!;
       } else {
-        debugPrint("🚀 [ShortsCache] Cache TTL expired for video: $videoId. Evicting...");
+        AppLogger.log("[ShortsCache] Cache TTL expired for video: $videoId. Evicting...");
         _evict(videoId);
       }
     }
 
-    debugPrint("🚀 [ShortsCache] Cache MISS for video: $videoId. Fetching...");
+    AppLogger.log("[ShortsCache] Cache MISS for video: $videoId. Fetching...");
     
     // 2. Fetch and register Future in cache map (which automatically dedupes in-flight queries)
     final Future<String?> future = _resolveStreamUrl(videoId).then((url) {
@@ -40,7 +41,7 @@ class ShortsStreamCache {
       }
       return url;
     }).catchError((e) {
-      debugPrint("🚀 [ShortsCache] Manifest fetch failed and evicted for video: $videoId. Error: $e");
+      AppLogger.logError("[ShortsCache] Manifest fetch failed and evicted for video: $videoId", e);
       _evict(videoId);
       throw e;
     });
@@ -54,7 +55,7 @@ class ShortsStreamCache {
       final oldestKey = _cacheKeys.removeAt(0);
       _cache.remove(oldestKey);
       _fetchTimes.remove(oldestKey);
-      debugPrint("🚀 [ShortsCache] Cache limit exceeded. Evicted oldest entry: $oldestKey");
+      AppLogger.log("[ShortsCache] Cache limit exceeded. Evicted oldest entry: $oldestKey");
     }
 
     return future;
@@ -70,7 +71,7 @@ class ShortsStreamCache {
     
     _debounceTimer = Timer(const Duration(milliseconds: 200), () async {
       if (generation != _currentWarmupGeneration) {
-        debugPrint("🚀 [ShortsCache] Warmup skipped for index $index because generation changed.");
+        AppLogger.log("[ShortsCache] Warmup skipped for index $index because generation changed.");
         return;
       }
 
@@ -82,7 +83,7 @@ class ShortsStreamCache {
             if (!_cache.containsKey(videoId)) {
               // Initiate fetch without waiting for it sequentially
               getStreamUrl(videoId).catchError((e) {
-                debugPrint("🚀 [ShortsCache] Warmup fetch failed for video $videoId: $e");
+                AppLogger.logWarning("[ShortsCache] Warmup fetch failed for video $videoId: $e");
                 return null;
               });
             }
@@ -109,17 +110,17 @@ class ShortsStreamCache {
         );
         final muxed = manifest.muxed.sortByVideoQuality();
         if (muxed.isNotEmpty) {
-          debugPrint("🚀 [ShortsCache] Stream resolved via ${client.toString()} for $videoId");
+          AppLogger.log("[ShortsCache] Stream resolved via ${client.toString()} for $videoId");
           return muxed.first.url.toString();
         }
       } catch (e) {
-        debugPrint("🚀 [ShortsCache] Client ${client.toString()} failed for $videoId: $e. Trying next...");
+        AppLogger.logWarning("[ShortsCache] Client ${client.toString()} failed for $videoId: $e. Trying next...");
         continue;
       }
     }
 
     // All clients failed
-    debugPrint("🚀 [ShortsCache] All clients failed for $videoId");
+    AppLogger.logError("[ShortsCache] All clients failed for $videoId. Video may be private/deleted or IP rate limited.");
     return null;
   }
 
@@ -133,7 +134,7 @@ class ShortsStreamCache {
     _cache.clear();
     _fetchTimes.clear();
     _cacheKeys.clear();
-    debugPrint("🚀 [ShortsCache] Cache cleared.");
+    AppLogger.log("[ShortsCache] Cache cleared.");
   }
 
   void dispose() {

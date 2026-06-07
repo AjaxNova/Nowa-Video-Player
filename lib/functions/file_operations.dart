@@ -1,21 +1,98 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:nova_videoplayer/functions/global_variables.dart';
+import 'package:nova_videoplayer/functions/app_logger.dart';
 
 class FileOperations {
 
-  /// Delete a video. Uses MediaStore on API 30+, direct delete on API 21-29.
-  /// Returns true on success, false on failure or user cancellation.
+  /// Delete a video. Uses direct file delete if MANAGE_EXTERNAL_STORAGE is granted, otherwise falls back to MediaStore confirmation dialog.
   static Future<bool> deleteVideo({
     required BuildContext context,
     required AssetEntity asset,
   }) async {
     try {
-      final result = await PhotoManager.editor.deleteWithIds([asset.id]);
-      return result.isNotEmpty;
+      // Check if we have MANAGE_EXTERNAL_STORAGE
+      // If yes — delete directly and silently, no system dialog
+      final hasManagePermission = await Permission.manageExternalStorage.isGranted;
+
+      if (hasManagePermission) {
+        // Silent delete — direct file deletion, bypasses MediaStore dialog
+        final file = await asset.file;
+        if (file == null) return false;
+        if (await file.exists()) {
+          await file.delete();
+          // Notify MediaStore that file is gone
+          await PhotoManager.editor.deleteWithIds([asset.id]);
+        }
+        return true;
+      } else {
+        // Fallback — MediaStore delete with system dialog
+        final result = await PhotoManager.editor.deleteWithIds([asset.id]);
+        return result.isNotEmpty;
+      }
     } catch (e) {
+      AppLogger.logError('FileOperations.deleteVideo failed', e, StackTrace.current);
       return false;
     }
+  }
+
+  /// Call this once before the first delete attempt.
+  /// Shows a one-time explanation dialog then requests MANAGE_EXTERNAL_STORAGE.
+  /// Returns true if permission granted.
+  static Future<bool> requestManageStoragePermission(BuildContext context) async {
+    // Already granted — nothing to do
+    if (await Permission.manageExternalStorage.isGranted) return true;
+
+    // Show explanation first — one time only
+    final shouldRequest = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161616),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: Text(
+          'Storage Access',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15.sp,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'To delete videos without extra confirmation steps, Nowa needs full storage access. This is a one-time request.',
+          style: TextStyle(color: Colors.white60, fontSize: 12.sp, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Not now',
+              style: TextStyle(color: Colors.white38, fontSize: 12.sp),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Allow',
+              style: TextStyle(
+                color: colorGreen,
+                fontSize: 12.sp,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldRequest != true) return false;
+
+    // Request the permission — takes user to Android settings
+    final status = await Permission.manageExternalStorage.request();
+    return status.isGranted;
   }
 
   /// Copy a video file to a destination folder path.

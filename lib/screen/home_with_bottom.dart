@@ -9,6 +9,7 @@ import 'package:nova_videoplayer/screen/live_shorts/live_shorts_screen.dart';
 import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/fav_and_playlist_select_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/shorts_page/shorts_try_two.dart';
+import 'package:nova_videoplayer/screen/live_shorts/shorts_container_screen.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../settings/settings_page.dart';
 
@@ -36,8 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _children = [
       AllVideosPage(assets: widget.assets, foldersWithVideos: widget.foldersWithVideos),
       FolderPage(foldersWithVideos: widget.foldersWithVideos),
-      ShortsFeedScreen(),
-      // ShortsPageTry(shortVideos: theAllShortVideos),
+      const ShortsContainerScreen(),
       const PlaylistOrFavorite(),
       const SettingsScreen(),
     ];

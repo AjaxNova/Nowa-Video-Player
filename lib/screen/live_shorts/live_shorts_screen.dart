@@ -27,14 +27,14 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
     _controller.addListener(_onControllerChanged);
 
     // Bind to the global tab listener to synchronize visibility
-    isShortsTabActive.addListener(_onTabActiveChanged);
+    isLiveShortsTabActive.addListener(_onTabActiveChanged);
     // Sync initial state
-    _controller.pool.setVisible(isShortsTabActive.value);
+    _controller.pool.setVisible(isLiveShortsTabActive.value);
   }
 
   void _onTabActiveChanged() {
     if (mounted) {
-      _controller.pool.setVisible(isShortsTabActive.value);
+      _controller.pool.setVisible(isLiveShortsTabActive.value);
     }
   }
 
@@ -47,7 +47,7 @@ class _ShortsFeedScreenState extends State<ShortsFeedScreen> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
-    isShortsTabActive.removeListener(_onTabActiveChanged);
+    isLiveShortsTabActive.removeListener(_onTabActiveChanged);
     _controller.dispose();
     _searchController.dispose();
     super.dispose();
