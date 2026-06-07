@@ -23,11 +23,12 @@ class FileOperations {
         final file = await asset.file;
         if (file == null) return false;
         if (await file.exists()) {
-          await file.delete();
-          // Notify MediaStore that file is gone
-          await PhotoManager.editor.deleteWithIds([asset.id]);
+          await file.delete(); // actual file deletion
         }
-        return true;
+        try {
+          await PhotoManager.editor.deleteWithIds([asset.id]); // MediaStore sync — ignore if fails
+        } catch (_) {} // file already gone, MediaStore cleanup is best-effort
+        return true; // always return true if we got this far
       } else {
         // Fallback — MediaStore delete with system dialog
         final result = await PhotoManager.editor.deleteWithIds([asset.id]);

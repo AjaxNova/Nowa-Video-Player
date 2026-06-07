@@ -1159,10 +1159,6 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                       final navigator = Navigator.of(context);
                       navigator.pop(ctx); // close confirmation sheet
 
-                      // Request MANAGE_EXTERNAL_STORAGE on first delete — silent after that
-                      await FileOperations.requestManageStoragePermission(context);
-                      if (!mounted) return;
-
                       // Proceed with delete regardless — if permission denied,
                       // deleteVideo falls back to MediaStore dialog automatically
                       final success = await FileOperations.deleteVideo(
@@ -1170,16 +1166,18 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
                         asset: widget.video,
                       );
 
-                      if (success && mounted) {
-                        widget.onVideoDeleted?.call(widget.video);
-                      } else if (!success && mounted) {
+                      // Always remove from list regardless of success
+                      if (mounted) widget.onVideoDeleted?.call(widget.video);
+
+                      // Show error only if delete actually failed
+                      if (!success && mounted) {
                         scaffoldMessenger.showSnackBar(
                           SnackBar(
                             content: Text(
-                              'Could not delete video',
+                              'Could not delete file — removed from list',
                               style: TextStyle(fontSize: 12.sp),
                             ),
-                            backgroundColor: const Color(0xFF1A0505),
+                            backgroundColor: const Color(0xFF1A1A0A),
                             behavior: SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8.r),
