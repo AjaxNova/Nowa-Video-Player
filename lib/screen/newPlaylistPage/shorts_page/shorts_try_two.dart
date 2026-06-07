@@ -29,7 +29,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
   late AnimationController _deleteAnimController;
   int? _deletingIndex;
   String? _deletingTitle;
-  int? _deletingSize;
+  dynamic _deletingSize;
 
   // Preload Caches for Flagship devices
   final Map<int, Player> _preloadedPlayers = {};
@@ -287,69 +287,48 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                             // 1. Stop playback immediately
                             activeShortsPlayer.value?.pause();
 
-                            // Fetch asset metadata for the animation
-                            String? title = asset.title;
-                            int? size;
-                            try {
-                              final file = await asset.file;
-                              size = await file?.length();
-                            } catch (_) {}
-
-                            // 2. Mark this index as deleting and play Google Files Clean animation
+                            // 2. Show animation — use asset.size directly, no disk I/O
                             if (mounted) {
                               setState(() {
                                 _deletingIndex = currentIndex;
-                                _deletingTitle = title;
-                                _deletingSize = size;
+                                _deletingTitle = asset.title;
+                                _deletingSize = asset.size; // from MediaStore, already in memory
                               });
                             }
                             _deleteAnimController.forward();
-                            
-                            // Wait for the full animation sequence (1500ms)
+
+                            // 3. Wait for animation
                             await Future.delayed(const Duration(milliseconds: 1500));
                             if (!mounted) return;
 
-                            // 3. Scroll to adjacent video if possible
+                            // 4. Determine target index BEFORE mutating list
                             final hasNext = currentIndex < _videos.length - 1;
                             final hasPrev = currentIndex > 0;
+                            final targetIndex = hasNext
+                                ? currentIndex      // after removal, next video shifts into currentIndex
+                                : hasPrev
+                                    ? currentIndex - 1
+                                    : 0;
 
-                            if (hasNext) {
-                              // Scroll down to next short
-                              await _pageController.animateToPage(
-                                currentIndex + 1,
-                                duration: const Duration(milliseconds: 600),
-                                curve: Curves.easeInOutCubic,
-                              );
-                            } else if (hasPrev) {
-                              // Scroll up to previous short
-                              await _pageController.animateToPage(
-                                currentIndex - 1,
-                                duration: const Duration(milliseconds: 600),
-                                curve: Curves.easeInOutCubic,
-                              );
-                            }
+                            // 5. Mutate list
+                            setState(() {
+                              _videos.removeWhere((v) => v.id == asset.id);
+                              _deletingIndex = null;
+                              _deletingTitle = null;
+                              _deletingSize = null;
+                            });
 
-                            // 4. Mutate list while hidden/scrolled away
-                            if (mounted) {
-                              setState(() {
-                                _videos.removeWhere((v) => v.id == asset.id);
-                                _deletingIndex = null;
-                                _deletingTitle = null;
-                                _deletingSize = null;
-                              });
-                            }
-
-                            // 5. Instantly jump to the correct index in the new list to align state
-                            if (_videos.isEmpty) {
-                              // Scaffold will rebuild to show empty screen
-                            } else if (hasNext) {
-                              _pageController.jumpToPage(currentIndex);
-                            } else if (hasPrev) {
-                              _pageController.jumpToPage(currentIndex - 1);
-                            }
-
-                            // Reset animation controller instantly for the next deletion
                             _deleteAnimController.reset();
+
+                            // 6. If list empty — build() handles empty state
+                            if (_videos.isEmpty) return;
+
+                            // 7. Jump instantly to target — NO animateToPage, animation already covered transition
+                            _pageController.jumpToPage(targetIndex);
+
+                            // 8. Update notifier so the new active page starts playing
+                            _currentIndexNotifier.value = targetIndex;
+                            _pendingIndex = targetIndex;
                           },
                         ),
                         if (isDeleting)
@@ -1828,7 +1807,7 @@ class _FolderPickerSheetState extends State<_FolderPickerSheet> {
 class _GoogleFilesCleanAnimation extends StatelessWidget {
   final Animation<double> animation;
   final String videoTitle;
-  final int? videoSize;
+  final dynamic videoSize;
   final bool hasMoreVideos;
 
   const _GoogleFilesCleanAnimation({
@@ -1975,7 +1954,11 @@ class _GoogleFilesCleanAnimation extends StatelessWidget {
                                 if (videoSize != null) ...[
                                   SizedBox(height: 4.h),
                                   Text(
-                                    FileOperations.formatSize(videoSize!),
+                                    videoSize is int
+                                        ? FileOperations.formatSize(videoSize)
+                                        : videoSize is Size
+                                            ? "${(videoSize as Size).width.toInt()}x${(videoSize as Size).height.toInt()}"
+                                            : videoSize.toString(),
                                     style: TextStyle(
                                       color: Colors.white30,
                                       fontSize: 10.sp,
