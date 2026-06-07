@@ -10,7 +10,6 @@ import 'package:nova_videoplayer/screen/media_kit_video_player_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/fav_and_playlist_select_page.dart';
 import 'package:nova_videoplayer/screen/newPlaylistPage/shorts_page/shorts_try_two.dart';
 import 'package:nova_videoplayer/screen/live_shorts/shorts_container_screen.dart';
-import 'package:nova_videoplayer/functions/file_operations.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../settings/settings_page.dart';
 
@@ -42,10 +41,6 @@ class _HomeScreenState extends State<HomeScreen> {
       const PlaylistOrFavorite(),
       const SettingsScreen(),
     ];
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      FileOperations.requestManageStoragePermission(context);
-    });
   }
 
   @override

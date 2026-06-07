@@ -5,6 +5,7 @@ import 'package:nova_videoplayer/provider/video_data_provider.dart';
 import 'package:nova_videoplayer/screen/home_with_bottom.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../functions/app_logger.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -15,8 +16,8 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  List<AssetPathEntity> allFolderswithVideos = [];
   List<AssetEntity> allVideosList = [];
+  List<AssetPathEntity> allFolderswithVideos = [];
   bool isLoading = false;
   String statusMessage = "Initializing...";
 
@@ -43,6 +44,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _requestPermissionAndFetchVideos() async {
     try {
+      // Step 1 — Request video access permission
       final PermissionState ps = await PhotoManager.requestPermissionExtend(
         requestOption: const PermissionRequestOption(
           androidPermission: AndroidPermission(
@@ -53,14 +55,70 @@ class _SplashScreenState extends State<SplashScreen> {
       );
 
       if (ps.isAuth || ps.isLimited || ps.hasAccess) {
+        // Step 2 — Request MANAGE_EXTERNAL_STORAGE right after
+        // User is already in "grant permission" mindset
+        // Only ask if not already granted
+        if (!await Permission.manageExternalStorage.isGranted) {
+          await _requestManageStoragePermission();
+        }
+
         await fetchvideos();
       } else {
         if (mounted) _showPermissionDeniedDialog();
       }
     } catch (e, stackTrace) {
       AppLogger.logError('SplashScreen: Error requesting permissions', e, stackTrace);
-      debugPrint('Error requesting permissions: $e');
       if (mounted) _showErrorDialog('Permission error: $e');
+    }
+  }
+
+  Future<void> _requestManageStoragePermission() async {
+    if (!mounted) return;
+
+    // Show explanation dialog
+    final shouldRequest = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161616),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16.r)),
+        title: Text(
+          'Storage Access',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 15.sp,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'To delete videos without extra confirmation steps, Nowa needs full storage access. This is a one-time setup.',
+          style: TextStyle(color: Colors.white60, fontSize: 12.sp, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Not now',
+              style: TextStyle(color: Colors.white38, fontSize: 12.sp),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(
+              'Allow',
+              style: TextStyle(
+                color: colorGreen,
+                fontSize: 12.sp,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldRequest == true) {
+      await Permission.manageExternalStorage.request();
     }
   }
 
