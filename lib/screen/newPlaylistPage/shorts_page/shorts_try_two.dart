@@ -13,6 +13,10 @@ import '../../../functions/app_logger.dart';
 import '../../../settings/shorts_settings_screen.dart';
 import '../../../functions/file_operations.dart';
 import 'package:flutter/gestures.dart';
+import 'shorts_thumbnail_cache.dart';
+import 'shorts_performance_tracker.dart';
+import 'shorts_playback_engine.dart';
+import 'shorts_snap_controller.dart';
 
 class ShortsPageTry extends StatefulWidget {
   const ShortsPageTry({super.key, required this.shortVideos});
@@ -22,7 +26,7 @@ class ShortsPageTry extends StatefulWidget {
   State<ShortsPageTry> createState() => _ShortsPageTryState();
 }
 
-class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProviderStateMixin {
+class _ShortsPageTryState extends State<ShortsPageTry> with TickerProviderStateMixin {
   late PageController _pageController;
   final ValueNotifier<int> _currentIndexNotifier = ValueNotifier<int>(0);
   late List<AssetEntity> _videos;
@@ -31,10 +35,11 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
   String? _deletingTitle;
   dynamic _deletingSize;
 
-  // Preload Caches for Flagship devices
-  final Map<int, Player> _preloadedPlayers = {};
-  final Map<int, VideoController> _preloadedControllers = {};
-  final Map<int, File?> _preloadedFiles = {};
+  late AnimationController _shuffleAnimController;
+  bool _isShuffling = false;
+
+  late final ShortsPlaybackEngine _playbackEngine;
+  late final ShortsSnapController _snapController;
   int _pendingIndex = 0;
 
   @override
@@ -45,75 +50,37 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
+    _shuffleAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1800),
+    );
     _pageController = PageController(initialPage: _currentIndexNotifier.value);
     pipActionTrigger.addListener(_handlePipAction);
+    shortsShuffleNotifier.addListener(_handleShuffleAction);
+
+    // Initialize the engine and snap controller based on device tier
+    final poolSize = (deviceTier == DeviceTier.flagship) ? 5 : (deviceTier == DeviceTier.lowEnd ? 1 : 3);
+    final preloadRange = (deviceTier == DeviceTier.flagship) ? 2 : (deviceTier == DeviceTier.lowEnd ? 0 : 1);
     
-    // Trigger initial prefetch and preload for the very first videos
-    _prefetchFiles(0);
-    _preloadAdjacentVideos(0);
+    _playbackEngine = ShortsPlaybackEngine(
+      config: ShortsPlaybackConfig(
+        playerPoolSize: poolSize,
+        videoPreloadRange: preloadRange,
+        maxConcurrentPrepares: 1,
+      ),
+    );
+    _snapController = ShortsSnapController(engine: _playbackEngine);
+    _playbackEngine.updateVideosList(_videos);
+    _playbackEngine.updateActiveIndex(_currentIndexNotifier.value);
   }
 
   // Background Disk I/O: Pre-fetch video files so paths are ready before rendering
   void _prefetchFiles(int currentIndex) {
-    for (final offset in [1, 2, -1]) {
+    for (final offset in [1, 2, -1, -2]) {
       final i = currentIndex + offset;
       if (i < 0 || i >= _videos.length) continue;
-      // Trigger in background, result intentionally not awaited here
       _videos[i].file;
     }
-  }
-
-  Future<void> _preloadSingle(int index) async {
-    if (index < 0 || index >= _videos.length) return;
-    if (_preloadedPlayers.containsKey(index)) return; // already done
-
-    final file = await _videos[index].file;
-    if (!mounted) return;
-    if (file == null) return;
-    
-    final player = Player();
-    final controller = VideoController(player);
-    // open but don't play
-    await player.open(Media(file.path), play: false); 
-    await player.seek(Duration.zero); // force decoder to decode first frame
-    
-    if (!mounted) {
-      player.dispose();
-      return;
-    }
-    
-    _preloadedPlayers[index] = player;
-    _preloadedControllers[index] = controller;
-    _preloadedFiles[index] = file;
-  }
-
-  // Native Engine Preload: Initialize media_kit engines for surrounding videos
-  void _preloadAdjacentVideos(int currentIndex) async {
-    if (deviceTier == DeviceTier.lowEnd) return; // no preloading
-
-    if (deviceTier == DeviceTier.midRange) {
-      await _preloadSingle(currentIndex + 1); // next only
-    } else {
-      // flagship: both directions
-      await _preloadSingle(currentIndex + 1);
-      _preloadSingle(currentIndex - 1); // fire and forget, no await
-    }
-    
-    // Memory Management: Cleanup players outside the ±1 range
-    final keysToRemove = _preloadedPlayers.keys.where((k) => (k - currentIndex).abs() > 1).toList();
-    for (final k in keysToRemove) {
-      _preloadedPlayers[k]?.dispose();
-      _preloadedPlayers.remove(k);
-      _preloadedControllers.remove(k);
-      _preloadedFiles.remove(k);
-    }
-  }
-
-  void _claimPreloadedPlayer(int index) {
-    // Child has taken ownership — remove from our map so cleanup won't dispose it
-    _preloadedPlayers.remove(index);
-    _preloadedControllers.remove(index);
-    _preloadedFiles.remove(index);
   }
 
   void _handlePipAction() {
@@ -133,18 +100,60 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
   @override
   void dispose() {
     pipActionTrigger.removeListener(_handlePipAction);
+    shortsShuffleNotifier.removeListener(_handleShuffleAction);
     _deleteAnimController.dispose();
+    _shuffleAnimController.dispose();
     _pageController.dispose();
     _currentIndexNotifier.dispose();
     
-    // Clean up all preloaded native engines
-    for (var player in _preloadedPlayers.values) {
-      player.dispose();
-    }
-    _preloadedPlayers.clear();
-    _preloadedControllers.clear();
-    _preloadedFiles.clear();
+    // Clean up playback engine
+    _playbackEngine.dispose();
     super.dispose();
+  }
+
+  void _handleShuffleAction() async {
+    // 1. Pause active player immediately
+    activeShortsPlayer.value?.pause();
+    activeShortsPlayer.value = null;
+    activeShortsVideoController.value = null;
+
+    if (mounted) {
+      setState(() {
+        _isShuffling = true;
+      });
+    }
+
+    // 2. Reset current player pool resources
+    _playbackEngine.dispose();
+
+    // 3. Play animation
+    _shuffleAnimController.forward();
+
+    // 4. Shuffle videos list (wait 600ms for user to see rotation animation start)
+    await Future.delayed(const Duration(milliseconds: 600));
+    theAllShortVideos.shuffle();
+    _videos = List.from(theAllShortVideos);
+
+    // 5. Jump back to page 0
+    if (_pageController.hasClients) {
+      _pageController.jumpToPage(0);
+    }
+    _currentIndexNotifier.value = 0;
+    _pendingIndex = 0;
+
+    // 6. Update list and preloads in new engine
+    _playbackEngine.updateVideosList(_videos);
+    _playbackEngine.updateActiveIndex(0);
+
+    // 7. Wait for complete animation duration
+    await Future.delayed(const Duration(milliseconds: 1200));
+    _shuffleAnimController.reset();
+
+    if (mounted) {
+      setState(() {
+        _isShuffling = false;
+      });
+    }
   }
 
   void _scrollToPrev() {
@@ -251,11 +260,15 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                 onNotification: (notification) {
                   if (notification is ScrollStartNotification) {
                     isShortsScrolling.value = true;
+                    ShortsPerformanceTracker.recordSwipe();
+                  } else if (notification is ScrollUpdateNotification) {
+                    _snapController.onScrollUpdate(notification, _currentIndexNotifier.value);
                   } else if (notification is ScrollEndNotification) {
                     isShortsScrolling.value = false;
                     // Only update active index on finger release — same as live shorts
                     if (_currentIndexNotifier.value != _pendingIndex) {
                       _currentIndexNotifier.value = _pendingIndex;
+                      _snapController.onPageSettled(_pendingIndex);
                     }
                   }
                   return true;
@@ -276,11 +289,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                           index: index,
                           activeIndexNotifier: _currentIndexNotifier,
                           onVideoEnd: _scrollToNext,
-                          preloadedPlayer: _preloadedPlayers[index],
-                          preloadedController: _preloadedControllers[index],
-                          preloadedFile: _preloadedFiles[index],
-                          onClaimPreload: () => _claimPreloadedPlayer(index),
-                          onPreloadSingle: _preloadSingle,
+                          playbackEngine: _playbackEngine,
                           onVideoDeleted: (asset) async {
                             final currentIndex = _currentIndexNotifier.value;
 
@@ -323,6 +332,9 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                             // 6. If list empty — build() handles empty state
                             if (_videos.isEmpty) return;
 
+                            _playbackEngine.updateVideosList(_videos);
+                            _playbackEngine.updateActiveIndex(targetIndex);
+
                             // 7. Jump instantly to target — NO animateToPage, animation already covered transition
                             _pageController.jumpToPage(targetIndex);
 
@@ -346,11 +358,14 @@ class _ShortsPageTryState extends State<ShortsPageTry> with SingleTickerProvider
                   onPageChanged: (int pageIndex) {
                     _pendingIndex = pageIndex;       // store only — does NOT trigger playback
                     _prefetchFiles(pageIndex);       // fine mid-drag — warms file cache
-                    _preloadAdjacentVideos(pageIndex); // fine mid-drag — preloads players
                     // DO NOT update _currentIndexNotifier here
                   },
                 ),
               ),
+              if (_isShuffling)
+                Positioned.fill(
+                  child: _ShortsShuffleAnimation(animation: _shuffleAnimController),
+                ),
             ],
           ),
         ),
@@ -364,11 +379,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   final int index;
   final ValueNotifier<int> activeIndexNotifier;
   final VoidCallback onVideoEnd;
-  final Player? preloadedPlayer;
-  final VideoController? preloadedController;
-  final File? preloadedFile;
-  final VoidCallback? onClaimPreload;
-  final Future<void> Function(int index)? onPreloadSingle;
+  final ShortsPlaybackEngine playbackEngine;
   final Function(AssetEntity)? onVideoDeleted;
 
   const VideoPLayerPageForShorts({
@@ -377,11 +388,7 @@ class VideoPLayerPageForShorts extends StatefulWidget {
     required this.index,
     required this.activeIndexNotifier,
     required this.onVideoEnd,
-    this.preloadedPlayer,
-    this.preloadedController,
-    this.preloadedFile,
-    this.onClaimPreload,
-    this.onPreloadSingle,
+    required this.playbackEngine,
     this.onVideoDeleted,
   });
 
@@ -389,41 +396,78 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   State<VideoPLayerPageForShorts> createState() => _VideoPLayerPageForShortsState();
 }
 
-// Global lock to prevent overlapping hardware decoder requests on low-end devices
-bool _globalDecoderLock = false;
-DateTime? _decoderLockAcquiredTime;
-String? _lockHolderVideoTitle;
-
 class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> with WidgetsBindingObserver {
-  Player? _player;
-  VideoController? _videoController;
-  bool loaded = false;
   bool isTurboMode = false;
   bool hasError = false;
   bool _isManuallyPaused = false;
   bool _isPlayingCache = false;
-  bool _ownsPlayer = false; // Tracks if this widget created the engine natively
   Uint8List? _cachedThumbnail;
 
   bool get _isActive => widget.activeIndexNotifier.value == widget.index;
   bool _wasActive = false;
   
+  // Telemetry variables
+  DateTime? _activationTime;
+  bool _isPreloadHit = false;
+  
   // Stream Subscriptions to prevent leaks
   StreamSubscription? _playingSub;
   StreamSubscription? _completedSub;
+  Player? _subscribedPlayer;
 
   int? _fileSizeBytes;
 
+  Player? get _player => widget.playbackEngine.getPlayer(widget.video.id);
+  VideoController? get _videoController => widget.playbackEngine.getController(widget.video.id);
+
+  bool get loaded {
+    final state = widget.playbackEngine.getState(widget.video.id);
+    return state == VideoPlaybackState.prepared || state == VideoPlaybackState.active;
+  }
 
   @override
   void initState() {
     super.initState();
     _wasActive = _isActive;
+    
+    final state = widget.playbackEngine.getState(widget.video.id);
+    _isPreloadHit = (state == VideoPlaybackState.prepared || state == VideoPlaybackState.active);
+
+    if (_isActive) {
+      _activationTime = DateTime.now();
+      HistoryVideos.addToHistory(widget.video);
+    }
+    
     widget.activeIndexNotifier.addListener(_onActiveIndexChanged);
+    widget.playbackEngine.addListener(_onEngineChanged);
+    isLocalShortsTabActive.addListener(_syncPlayback);
+    isShortsPiPMode.addListener(_syncPlayback);
+    isShortsAutoPlay.addListener(_onAutoPlayChanged);
+
     WidgetsBinding.instance.addObserver(this);
     _loadThumbnail();
-    
-    _initDeviceTierState();
+    _syncPlayback();
+  }
+
+  void _onEngineChanged() {
+    if (!mounted) return;
+    setState(() {});
+    _syncPlayback();
+  }
+
+  void _onActiveIndexChanged() {
+    final currentlyActive = _isActive;
+    if (_wasActive != currentlyActive) {
+      _wasActive = currentlyActive;
+      
+      if (currentlyActive) {
+        _activationTime = DateTime.now();
+        final state = widget.playbackEngine.getState(widget.video.id);
+        _isPreloadHit = (state == VideoPlaybackState.prepared || state == VideoPlaybackState.active);
+        HistoryVideos.addToHistory(widget.video);
+      }
+      _syncPlayback();
+    }
   }
 
   void _loadFileSizeBytes() async {
@@ -436,49 +480,8 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     } catch (_) {}
   }
 
-  void _initDeviceTierState() async {
-    switch (deviceTier) {
-      case DeviceTier.lowEnd:
-        if (_isActive) _initializeForLowEnd();
-        return;
-
-      case DeviceTier.midRange:
-      case DeviceTier.flagship:
-        if (_isActive) await _initializeForFlagship();
-        break;
-    }
-  }
-
-  void _onActiveIndexChanged() async {
-    final currentlyActive = _isActive;
-    if (_wasActive != currentlyActive) {
-      _wasActive = currentlyActive;
-      
-      switch (deviceTier) {
-        case DeviceTier.lowEnd:
-          if (currentlyActive) {
-            if (_player == null && !loaded && !hasError) {
-              _initializeForLowEnd();
-            }
-          } else {
-            _disposeVideoPlayer();
-          }
-          break;
-
-        case DeviceTier.midRange:
-        case DeviceTier.flagship:
-          if (currentlyActive && _player == null && !loaded && !hasError) {
-            await _initializeForFlagship();
-          }
-          break;
-      }
-      
-      _syncPlayback();
-    }
-  }
-
   Future<void> _loadThumbnail() async {
-    final data = await widget.video.thumbnailData;
+    final data = await ShortsThumbnailCache.getThumbnail(widget.video);
     if (mounted) setState(() => _cachedThumbnail = data);
   }
 
@@ -488,6 +491,10 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     if (oldWidget.activeIndexNotifier != widget.activeIndexNotifier) {
       oldWidget.activeIndexNotifier.removeListener(_onActiveIndexChanged);
       widget.activeIndexNotifier.addListener(_onActiveIndexChanged);
+    }
+    if (oldWidget.playbackEngine != widget.playbackEngine) {
+      oldWidget.playbackEngine.removeListener(_onEngineChanged);
+      widget.playbackEngine.addListener(_onEngineChanged);
     }
   }
 
@@ -501,20 +508,56 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     }
   }
 
+  void _updatePlayerSubscriptions() {
+    final p = _player;
+    if (p == _subscribedPlayer) return;
+    
+    _playingSub?.cancel();
+    _completedSub?.cancel();
+    _subscribedPlayer = null;
+    
+    if (p != null) {
+      _subscribedPlayer = p;
+      _playingSub = p.stream.playing.listen((playing) {
+        if (mounted) setState(() => _isPlayingCache = playing);
+        if (playing && _activationTime != null) {
+          final startupTimeMs = DateTime.now().difference(_activationTime!).inMilliseconds;
+          _activationTime = null;
+          ShortsPerformanceTracker.recordPlaybackStart(
+            videoId: widget.video.id,
+            wasPreloaded: _isPreloadHit,
+            startupTimeMs: startupTimeMs,
+          );
+        }
+      });
+
+      _completedSub = p.stream.completed.listen((completed) {
+        if (completed && isShortsAutoPlay.value && _isActive) {
+          widget.onVideoEnd();
+        }
+      });
+    }
+  }
+
   void _syncPlayback() {
-    if (_player != null) {
+    _updatePlayerSubscriptions();
+    final p = _player;
+    if (p != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value)) {
           if (!_isManuallyPaused) {
-            _player!.play();
+            p.play();
           }
-          activeShortsPlayer.value = _player;
+          activeShortsPlayer.value = p;
           activeShortsVideoController.value = _videoController;
         } else {
-          _player!.pause();
-          _player!.seek(Duration.zero);
-          _player!.setRate(1.0);
+          p.pause();
+          final distance = (widget.index - widget.activeIndexNotifier.value).abs();
+          if (distance > 2) {
+            p.seek(Duration.zero);
+          }
+          p.setRate(1.0);
           setState(() {
             isTurboMode = false;
             _isManuallyPaused = false;
@@ -528,249 +571,17 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     _player?.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
   }
 
-  void _disposeVideoPlayer({bool isDisposing = false}) {
-    if (_player != null) {
-      _playingSub?.cancel();
-      _completedSub?.cancel();
-      isLocalShortsTabActive.removeListener(_syncPlayback);
-      isShortsPiPMode.removeListener(_syncPlayback);
-      isShortsAutoPlay.removeListener(_onAutoPlayChanged);
-
-      if (_ownsPlayer) {
-        _player!.dispose();
-      }
-      _player = null;
-      _videoController = null;
-      if (!isDisposing && mounted) setState(() { loaded = false; hasError = false; });
-    }
-  }
-
   @override
   void dispose() {
     widget.activeIndexNotifier.removeListener(_onActiveIndexChanged);
+    widget.playbackEngine.removeListener(_onEngineChanged);
+    isLocalShortsTabActive.removeListener(_syncPlayback);
+    isShortsPiPMode.removeListener(_syncPlayback);
+    isShortsAutoPlay.removeListener(_onAutoPlayChanged);
     WidgetsBinding.instance.removeObserver(this);
-    _disposeVideoPlayer(isDisposing: true);
+    _playingSub?.cancel();
+    _completedSub?.cancel();
     super.dispose();
-  }
-
-  Future<void> _initializeForLowEnd() async {
-    try {
-      AppLogger.log("Shorts: Start low-end initializing video: ${widget.video.title}");
-      
-      AppLogger.log("Shorts: Low-end device detected. Waiting for decoder lock...");
-      final waitStart = DateTime.now();
-      
-      // Wait for the previous native player to release the lock
-      while (_globalDecoderLock) {
-        // Safety Check: If the lock has been held by another video for more than 4 seconds,
-        // the previous native initialization likely deadlocked in native C++/libmpv.
-        // We must force-break the lock to prevent locking out the whole session!
-        if (_decoderLockAcquiredTime != null && 
-            DateTime.now().difference(_decoderLockAcquiredTime!).inSeconds > 4) {
-          AppLogger.logWarning("Shorts: Global decoder lock FORCE-BROKEN! Held by '$_lockHolderVideoTitle' too long.");
-          _globalDecoderLock = false;
-          break;
-        }
-
-        await Future.delayed(const Duration(milliseconds: 100));
-        
-        // Guard against infinite loops inside this item's wait
-        if (DateTime.now().difference(waitStart).inSeconds > 8) {
-          AppLogger.logWarning("Shorts: Waited 8s for decoder lock. Proceeding anyway to avoid freeze.");
-          break;
-        }
-        
-        if (!mounted) {
-          AppLogger.log("Shorts: Scrolled away while waiting for decoder lock: ${widget.video.title}");
-          return;
-        }
-      }
-      
-      _globalDecoderLock = true;
-      _decoderLockAcquiredTime = DateTime.now();
-      _lockHolderVideoTitle = widget.video.title;
-      
-      AppLogger.log("Shorts: Decoder lock acquired. Adding 300ms delay...");
-      await Future.delayed(const Duration(milliseconds: 300));
-      
-      if (!mounted) {
-        _globalDecoderLock = false;
-        _decoderLockAcquiredTime = null;
-        AppLogger.log("Shorts: Scrolled away before fetching file: ${widget.video.title}");
-        return;
-      }
-
-      final file = await widget.video.file.timeout(const Duration(seconds: 5));
-      if (!mounted) {
-        AppLogger.log("Shorts: Scrolled away while fetching file: ${widget.video.title}");
-        return;
-      }
-      if (file == null) {
-        if (mounted) setState(() => hasError = true);
-        isShortsPiPError.value = true;
-        return;
-      }
-
-      _player = Player();
-      _ownsPlayer = true;
-      _videoController = VideoController(_player!);
-
-      // Pass play argument directly based on active state to guarantee playback
-      bool shouldPlay = _isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
-      
-      // Wrap native player opening in a hard 6-second timeout to prevent C++ thread blocks from freezing Dart
-      await _player!.open(Media(file.path), play: shouldPlay).timeout(const Duration(seconds: 6));
-      
-      if (!mounted) {
-        _player!.dispose();
-        return;
-      }
-      _player!.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
-
-      _playingSub = _player!.stream.playing.listen((playing) {
-        if (mounted) setState(() => _isPlayingCache = playing);
-      });
-
-      _completedSub = _player!.stream.completed.listen((completed) {
-        if (completed && isShortsAutoPlay.value && _isActive) {
-          widget.onVideoEnd();
-        }
-      });
-
-      isLocalShortsTabActive.addListener(_syncPlayback);
-      isShortsPiPMode.addListener(_syncPlayback);
-      isShortsAutoPlay.addListener(_onAutoPlayChanged);
-
-      _syncPlayback();
-
-      if (mounted) {
-        setState(() {
-          loaded = true;
-          hasError = false;
-        });
-        isShortsPiPError.value = false;
-        if (_isActive) {
-          HistoryVideos.addToHistory(widget.video);
-        }
-      }
-      AppLogger.log("Shorts: Low-end initialization complete for: ${widget.video.title}");
-    } catch (e, stackTrace) {
-      AppLogger.logError("Shorts Video Error on ${widget.video.title}", e, stackTrace);
-      isShortsPiPError.value = true;
-      if (mounted) {
-        setState(() {
-          hasError = true;
-          loaded = false; // Ensure loading spinner goes away
-        });
-        
-        // Show exact native exception on-screen for Release APK debugging
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Decoder Error: ${e.toString()}", style: TextStyle(fontSize: 12.sp, color: Colors.white)),
-            backgroundColor: Colors.red.shade900,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'COPY ERROR',
-              textColor: Colors.white,
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: e.toString()));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Error copied to clipboard"), duration: Duration(seconds: 2)),
-                );
-              },
-            ),
-          ),
-        );
-      }
-    } finally {
-      _globalDecoderLock = false;
-      _decoderLockAcquiredTime = null;
-      AppLogger.log("Shorts: Decoder lock released for: ${widget.video.title}");
-    }
-  }
-
-  Future<void> _initializeForFlagship() async {
-    try {
-      AppLogger.log("Shorts: Start flagship initialization: ${widget.video.title}");
-      
-      File? file = widget.preloadedFile;
-      _player = widget.preloadedPlayer;
-      _videoController = widget.preloadedController;
-
-      if (file == null || _player == null || _videoController == null) {
-        // Cache miss (e.g. fast scrolling), fetch dynamically
-        AppLogger.log("Shorts: Cache miss, fetching natively on flagship: ${widget.video.title}");
-        file = await widget.video.file.timeout(const Duration(seconds: 5));
-        if (!mounted) return;
-        if (file == null) {
-          if (mounted) setState(() => hasError = true);
-          isShortsPiPError.value = true;
-          return;
-        }
-        _player = Player();
-        _ownsPlayer = true;
-        _videoController = VideoController(_player!);
-        await _player!.open(Media(file.path), play: false).timeout(const Duration(seconds: 6));
-        if (!mounted) {
-          _player!.dispose();
-          return;
-        }
-      } else {
-        AppLogger.log("Shorts: Cache hit! Instant launch: ${widget.video.title}");
-        _ownsPlayer = true;
-        widget.onClaimPreload?.call();
-      }
-
-      // Guard here before any _player! usage
-      if (_player == null) {
-        if (mounted) setState(() => hasError = true);
-        return;
-      }
-
-      bool shouldPlay = _isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value) && !_isManuallyPaused;
-      
-      if (shouldPlay) {
-        _player!.play();
-      }
-
-      _player!.setPlaylistMode(isShortsAutoPlay.value ? PlaylistMode.none : PlaylistMode.single);
-
-      _playingSub = _player!.stream.playing.listen((playing) {
-        if (mounted) setState(() => _isPlayingCache = playing);
-      });
-
-      _completedSub = _player!.stream.completed.listen((completed) {
-        if (completed && isShortsAutoPlay.value && _isActive) {
-          widget.onVideoEnd();
-        }
-      });
-
-      isLocalShortsTabActive.addListener(_syncPlayback);
-      isShortsPiPMode.addListener(_syncPlayback);
-      isShortsAutoPlay.addListener(_onAutoPlayChanged);
-
-      _syncPlayback();
-
-      if (mounted) {
-        setState(() {
-          loaded = true;
-          hasError = false;
-        });
-        isShortsPiPError.value = false;
-        if (_isActive) {
-          HistoryVideos.addToHistory(widget.video);
-        }
-      }
-    } catch (e, stackTrace) {
-      AppLogger.logError("Shorts Flagship Video Error on ${widget.video.title}", e, stackTrace);
-      isShortsPiPError.value = true;
-      if (mounted) {
-        setState(() {
-          hasError = true;
-          loaded = false;
-        });
-      }
-    }
   }
 
   void _openSettingsMenu() {
@@ -2077,9 +1888,9 @@ class FastShortsPagePhysics extends PageScrollPhysics {
 
   @override
   SpringDescription get spring => const SpringDescription(
-        mass: 0.45,
-        stiffness: 420,
-        damping: 32,
+        mass: 0.6,
+        stiffness: 180,
+        damping: 24,
       );
 
   @override
@@ -2087,4 +1898,94 @@ class FastShortsPagePhysics extends PageScrollPhysics {
         velocity: 1.0,
         distance: 0.5,
       );
+}
+
+class _ShortsShuffleAnimation extends StatelessWidget {
+  final Animation<double> animation;
+
+  const _ShortsShuffleAnimation({required this.animation});
+
+  @override
+  Widget build(BuildContext context) {
+    final fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.0, 0.20, curve: Curves.easeOut)),
+    );
+
+    final rotateAnimation = Tween<double>(begin: 0.0, end: 4.0).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.15, 0.85, curve: Curves.elasticOut)),
+    );
+
+    final scaleAnimation = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween<double>(begin: 0.0, end: 1.2), weight: 30),
+      TweenSequenceItem(tween: Tween<double>(begin: 1.2, end: 1.0), weight: 70),
+    ]).animate(
+      CurvedAnimation(parent: animation, curve: const Interval(0.0, 0.50, curve: Curves.easeOutBack)),
+    );
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        return Opacity(
+          opacity: fadeAnimation.value,
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.95),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Transform.scale(
+                    scale: scaleAnimation.value,
+                    child: Transform.rotate(
+                      angle: rotateAnimation.value * 3.14159,
+                      child: Container(
+                        padding: EdgeInsets.all(24.w),
+                        decoration: BoxDecoration(
+                          color: colorGreen.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: colorGreen.withValues(alpha: 0.4), width: 1.5),
+                        ),
+                        child: Icon(
+                          Icons.shuffle_rounded,
+                          color: colorGreen,
+                          size: 48.sp,
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 32.h),
+                  Text(
+                    "SHUFFLING FEED",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16.sp,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 2.0,
+                    ),
+                  ),
+                  SizedBox(height: 8.h),
+                  Text(
+                    "Re-arranging your local video feed...",
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 12.sp,
+                    ),
+                  ),
+                  SizedBox(height: 24.h),
+                  SizedBox(
+                    width: 140.w,
+                    height: 2.h,
+                    child: LinearProgressIndicator(
+                      color: colorGreen,
+                      backgroundColor: Colors.white10,
+                      borderRadius: BorderRadius.circular(1.5.r),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

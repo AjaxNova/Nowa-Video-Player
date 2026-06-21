@@ -159,6 +159,9 @@ class _HomeScreenState extends State<HomeScreen> {
           isShortsTabActive.value = (_currentIndex == 2);
         });
       },
+      onLongPress: index == 2 ? () {
+        shortsShuffleNotifier.value++;
+      } : null,
       behavior: HitTestBehavior.opaque,
       child: Container(
         width: 60.w,

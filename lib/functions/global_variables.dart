@@ -247,6 +247,7 @@ ValueNotifier<bool> isLiveShortsTabActive = ValueNotifier(false);
 ValueNotifier<bool> isShortsAutoPlay = ValueNotifier(false);
 ValueNotifier<bool> isShortsPiPMode = ValueNotifier(false);
 ValueNotifier<bool> isShortsPiPError = ValueNotifier(false);
+ValueNotifier<int> shortsShuffleNotifier = ValueNotifier(0);
 
 // Main Video PiP State
 ValueNotifier<bool> isMainPiPMode = ValueNotifier(false);
