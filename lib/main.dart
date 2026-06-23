@@ -8,9 +8,15 @@ import 'package:provider/provider.dart';
 
 import 'functions/new_playlist_class.dart';
 import 'functions/global_variables.dart';
+import 'functions/notification_service.dart';
+import 'functions/background_update_checker.dart';
 
 main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NotificationService.init();
+  await NotificationService.requestPermission();
+  await BackgroundUpdateChecker.init();
+  await BackgroundUpdateChecker.schedulePeriodicCheck();
   MediaKit.ensureInitialized();
   await Hive.initFlutter();
 

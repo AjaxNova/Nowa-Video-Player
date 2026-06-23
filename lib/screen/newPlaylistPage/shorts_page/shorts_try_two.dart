@@ -9,7 +9,6 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../../functions/history.dart';
-import '../../../functions/app_logger.dart';
 import '../../../settings/shorts_settings_screen.dart';
 import '../../../functions/file_operations.dart';
 import 'package:flutter/gestures.dart';
@@ -61,17 +60,27 @@ class _ShortsPageTryState extends State<ShortsPageTry> with TickerProviderStateM
     // Initialize the engine and snap controller based on device tier
     final poolSize = (deviceTier == DeviceTier.flagship) ? 5 : (deviceTier == DeviceTier.lowEnd ? 1 : 3);
     final preloadRange = (deviceTier == DeviceTier.flagship) ? 2 : (deviceTier == DeviceTier.lowEnd ? 0 : 1);
+    final maxConcurrentPrepares = (deviceTier == DeviceTier.lowEnd) ? 1 : 2;
     
     _playbackEngine = ShortsPlaybackEngine(
       config: ShortsPlaybackConfig(
         playerPoolSize: poolSize,
         videoPreloadRange: preloadRange,
-        maxConcurrentPrepares: 1,
+        maxConcurrentPrepares: maxConcurrentPrepares,
       ),
     );
     _snapController = ShortsSnapController(engine: _playbackEngine);
     _playbackEngine.updateVideosList(_videos);
-    _playbackEngine.updateActiveIndex(_currentIndexNotifier.value);
+    
+    isLocalShortsTabActive.addListener(_onTabActiveChanged);
+    _onTabActiveChanged();
+  }
+
+  void _onTabActiveChanged() {
+    _playbackEngine.setEnabled(isLocalShortsTabActive.value);
+    if (isLocalShortsTabActive.value) {
+      _playbackEngine.updateActiveIndex(_currentIndexNotifier.value);
+    }
   }
 
   // Background Disk I/O: Pre-fetch video files so paths are ready before rendering
@@ -99,6 +108,7 @@ class _ShortsPageTryState extends State<ShortsPageTry> with TickerProviderStateM
 
   @override
   void dispose() {
+    isLocalShortsTabActive.removeListener(_onTabActiveChanged);
     pipActionTrigger.removeListener(_handlePipAction);
     shortsShuffleNotifier.removeListener(_handleShuffleAction);
     _deleteAnimController.dispose();
@@ -414,6 +424,7 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   StreamSubscription? _playingSub;
   StreamSubscription? _completedSub;
   Player? _subscribedPlayer;
+  Object? _syncCallbackToken;
 
   int? _fileSizeBytes;
 
@@ -451,8 +462,13 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
 
   void _onEngineChanged() {
     if (!mounted) return;
+    // Only re-sync playback if this tile's assignment actually changed
+    final currentPlayer = widget.playbackEngine.getPlayer(widget.video.id);
+    final stateChanged = currentPlayer != _subscribedPlayer;
     setState(() {});
-    _syncPlayback();
+    if (stateChanged) {
+      _syncPlayback();
+    }
   }
 
   void _onActiveIndexChanged() {
@@ -542,9 +558,19 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
   void _syncPlayback() {
     _updatePlayerSubscriptions();
     final p = _player;
-    if (p != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+    if (p == null) {
+      // Our player was evicted — make sure old subscriptions are dead
+      _playingSub?.cancel();
+      _completedSub?.cancel();
+      _subscribedPlayer = null;
+      return; // nothing to sync, we have no player
+    }
+
+    final token = Object();
+    _syncCallbackToken = token;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _syncCallbackToken != token) return;
         if (_isActive && (isLocalShortsTabActive.value || isShortsPiPMode.value)) {
           if (!_isManuallyPaused) {
             p.play();
@@ -564,7 +590,6 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
           });
         }
       });
-    }
   }
 
   void _onAutoPlayChanged() {

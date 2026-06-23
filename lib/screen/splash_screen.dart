@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/animation.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/provider/video_data_provider.dart';
@@ -15,15 +16,17 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   List<AssetEntity> allVideosList = [];
   List<AssetPathEntity> allFolderswithVideos = [];
   bool isLoading = false;
+  late final AnimationController _logoController;
   String statusMessage = "Initializing...";
 
   @override
   void initState() {
     super.initState();
+    _logoController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800))..forward();
     _initializeApp();
   }
 
@@ -165,17 +168,29 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF0D0D0D), Color(0xFF1A1A1A)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              height: 200.h,
-              width: 250.w,
-              decoration: const BoxDecoration(
-                image: DecorationImage(image: AssetImage('assets/images/SplashLogo.png'), fit: BoxFit.contain),
+            FadeTransition(
+              opacity: _logoController,
+              child: Container(
+                height: 200.h,
+                width: 250.w,
+                decoration: const BoxDecoration(
+                  image: DecorationImage(image: AssetImage('assets/images/SplashLogo.png'), fit: BoxFit.contain),
+                ),
               ),
             ),
             SizedBox(height: 20.h),
@@ -196,11 +211,24 @@ class _SplashScreenState extends State<SplashScreen> {
             SizedBox(height: 10.h),
             Text(statusMessage, style: TextStyle(fontFamily: "Inter", fontSize: 14.sp, color: Colors.white70)),
             SizedBox(height: 60.h),
-            Text('NOWA PLAYER', style: TextStyle(fontFamily: "Inter", fontSize: 18.sp, color: Colors.white)),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children:  [
+                Icon(Icons.play_arrow, color: Colors.white, size: 24),
+                SizedBox(width: 8),
+                Text('NOWA PLAYER', style: TextStyle(fontFamily: "Inter", fontSize: 18.sp, color: Colors.white)),
+              ],
+            ),
           ],
         ),
       ),
-    );
+    ));
+  }
+
+  @override
+  void dispose() {
+    _logoController.dispose();
+    super.dispose();
   }
 
   // Fetch videos function using Provider

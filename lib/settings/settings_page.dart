@@ -1,10 +1,12 @@
-// import 'package:flutter/material.dart';
 import 'package:flutter/material.dart';
 import 'package:nova_videoplayer/functions/global_variables.dart';
 import 'package:nova_videoplayer/settings/privacy_policy.dart';
 import 'package:nova_videoplayer/settings/terms_and_conditions.dart';
 import 'package:nova_videoplayer/settings/app_logs_screen.dart';
 import 'package:nova_videoplayer/settings/shorts_settings_screen.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import '../functions/app_update_service.dart';
 
 import '../functions/text_class.dart';
 import 'about_screen.dart';
@@ -97,6 +99,62 @@ class SettingsScreen extends StatelessWidget {
                     yourIcon: Icons.bug_report_outlined,
                   ),
                 ),
+                InkWell(
+                  onTap: () {
+                    AppUpdateService.instance.checkForUpdates(
+                      context: context,
+                      showNoUpdateDialog: true,
+                    );
+                  },
+                  child: ListSettings(
+                    titleText: 'Check for Updates',
+                    yourIcon: Icons.system_update_alt_rounded,
+                  ),
+                ),
+                SizedBox(height: 20.h),
+                FutureBuilder<PackageInfo>(
+                  future: PackageInfo.fromPlatform(),
+                  builder: (context, snapshot) {
+                    if (snapshot.hasData) {
+                      final info = snapshot.data!;
+                      return Column(
+                        children: [
+                          Divider(color: Colors.white10, thickness: 0.5, indent: 40.w, endIndent: 40.w),
+                          SizedBox(height: 12.h),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.play_circle_filled_rounded, color: Colors.white38, size: 18.sp),
+                              SizedBox(width: 6.w),
+                              Text(
+                                'NOWA PLAYER',
+                                style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 12.sp,
+                                  fontFamily: 'Inter',
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: 4.h),
+                          Text(
+                            'v${info.version}',
+                            style: TextStyle(
+                              color: Colors.white54,
+                              fontSize: 14.sp,
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    return const SizedBox.shrink();
+                  },
+                ),
+                const Spacer(),
               ],
             ),
           ),

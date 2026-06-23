@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -37,12 +37,16 @@ class ShortsPlaybackEngine extends ChangeNotifier {
   
   // Track preparation tracking times for first frame decoded latency
   final Map<String, DateTime> _prepStartTimes = {};
+  final Map<String, Completer<void>> _prepareCompleters = {};
+  final Map<Player, int> _playerOpenGeneration = {};
+  bool _isEnabled = false;
 
   final List<String> _prepareQueue = [];
   int _activePreparesCount = 0;
 
   String? _activeVideoId;
   int _activeIndex = 0;
+  int _playGeneration = 0;
   List<AssetEntity> _videos = [];
 
   ShortsPlaybackEngine({required this.config})
@@ -66,13 +70,50 @@ class ShortsPlaybackEngine extends ChangeNotifier {
 
   List<AssetEntity> get videos => _videos;
 
+  void setEnabled(bool enabled) {
+    _isEnabled = enabled;
+    if (!enabled) {
+      // Pause whatever is playing when tab goes inactive
+      if (_activeVideoId != null) {
+        _assignments[_activeVideoId!]?.pause();
+      }
+    } else {
+      // Resume when tab becomes active
+      if (_activeVideoId != null && _assignments.containsKey(_activeVideoId)) {
+        final state = _states[_activeVideoId!];
+        if (state == VideoPlaybackState.active) {
+          _assignments[_activeVideoId!]?.play();
+        }
+      }
+    }
+    notifyListeners();
+  }
+
   /// Sets the current focused video index and plays it, pausing or preloading others.
   void updateActiveIndex(int activeIndex) {
     if (activeIndex < 0 || activeIndex >= _videos.length) return;
     
+    // Pause the currently active video immediately before switching
+    if (_activeVideoId != null && _activeVideoId != _videos[activeIndex].id) {
+      pauseVideo(_activeVideoId!);
+    }
+
     _activeIndex = activeIndex;
     final activeVideo = _videos[activeIndex];
     _activeVideoId = activeVideo.id;
+
+    // If the active video is currently mid-prepare, cancel it and restart
+    // so _play() doesn't have to wait for a potentially-stale open() to finish
+    final activeState = _states[activeVideo.id];
+    if (activeState == VideoPlaybackState.preparing) {
+      // Cancel existing prepare — _play() will restart it directly via _executePrepare
+      _prepareQueue.remove(activeVideo.id);
+      final staleCompleter = _prepareCompleters.remove(activeVideo.id);
+      if (staleCompleter != null && !staleCompleter.isCompleted) {
+        staleCompleter.complete();
+      }
+      _states[activeVideo.id] = VideoPlaybackState.assigned; // reset to assigned so _play() takes the direct path
+    }
 
     // 1. Warm up/prepare range: N-2 to N+2
     final Set<String> targetIds = {};
@@ -102,38 +143,81 @@ class ShortsPlaybackEngine extends ChangeNotifier {
   }
 
   void _play(String videoId) async {
-    _states[videoId] = VideoPlaybackState.active;
-    
     Player? player = _assignments[videoId];
     if (player == null) {
       player = _assignPlayer(videoId);
     }
-    
-    if (player != null) {
-      final state = _states[videoId];
-      if (state == VideoPlaybackState.assigned) {
-        prepare(videoId);
+    if (player == null) return;
+
+    final myGeneration = ++_playGeneration;
+    final state = _states[videoId];
+
+    if (state == VideoPlaybackState.prepared) {
+      _states[videoId] = VideoPlaybackState.active;
+      if (_isEnabled) {
+        player.play();
       }
-      player.play();
+      notifyListeners();
+    } else if (state != VideoPlaybackState.preparing) {
+      // Mark intent WITHOUT blocking prepare() from running
+      _states[videoId] = VideoPlaybackState.preparing; // ← NOT active yet
+      
+      // Store the completer to prevent double-loading if prepare() is called concurrently
+      final completer = Completer<void>();
+      _prepareCompleters[videoId] = completer;
+
+      await _executePrepare(videoId);                  // ← call directly, skip queue guard
+      
+      if (_playGeneration != myGeneration) return;
+      if (_activeVideoId == videoId && _assignments.containsKey(videoId)) {
+        _states[videoId] = VideoPlaybackState.active;
+        if (_isEnabled) {
+          _assignments[videoId]?.play();
+        }
+        notifyListeners();
+      }
+    } else {
+      // Already preparing — wait for it, then play
+      final future = _prepareCompleters[videoId]?.future;
+      if (future != null) {
+        await future;
+      }
+      
+      if (_playGeneration != myGeneration) return;
+      if (_activeVideoId == videoId && _assignments.containsKey(videoId)) {
+        _states[videoId] = VideoPlaybackState.active;
+        if (_isEnabled) {
+          _assignments[videoId]?.play();
+        }
+        notifyListeners();
+      }
     }
-    notifyListeners();
   }
 
-  void prepare(String videoId) {
+  Future<void> prepare(String videoId) async {
     final state = _states[videoId] ?? VideoPlaybackState.idle;
-    if (state == VideoPlaybackState.preparing ||
-        state == VideoPlaybackState.prepared ||
+    if (state == VideoPlaybackState.prepared ||
         state == VideoPlaybackState.active) {
-      return; // Idempotent check
+      return;
+    }
+
+    if (_prepareCompleters.containsKey(videoId)) {
+      await _prepareCompleters[videoId]!.future;
+      return;
     }
 
     if (!_assignments.containsKey(videoId)) {
       _assignPlayer(videoId);
     }
 
+    final completer = Completer<void>();
+    _prepareCompleters[videoId] = completer;
+
     _states[videoId] = VideoPlaybackState.preparing;
     _enqueuePrepare(videoId);
     notifyListeners();
+
+    await completer.future;
   }
 
   void _enqueuePrepare(String videoId) {
@@ -158,29 +242,60 @@ class ShortsPlaybackEngine extends ChangeNotifier {
 
   Future<void> _executePrepare(String videoId) async {
     final player = _assignments[videoId];
-    if (player == null) return;
+    if (player == null) {
+      final completer = _prepareCompleters.remove(videoId);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
+      return;
+    }
+
+    // Mark this open attempt
+    final myGen = (_playerOpenGeneration[player] ?? 0) + 1;
+    _playerOpenGeneration[player] = myGen;
 
     final asset = _videos.firstWhere((v) => v.id == videoId);
     try {
       final file = await asset.file;
-      if (file == null) return;
+      if (file == null) {
+        final completer = _prepareCompleters.remove(videoId);
+        if (completer != null && !completer.isCompleted) {
+          completer.complete();
+        }
+        return;
+      }
 
       _prepStartTimes[videoId] = DateTime.now();
       
       // Perform seek-free load of video files
       await player.open(Media(file.path), play: false);
       
+      // After open completes, check if this player is still ours
+      if (_playerOpenGeneration[player] != myGen) {
+        // Player was stolen and re-opened while we were waiting — our open is stale
+        final completer = _prepareCompleters.remove(videoId);
+        if (completer != null && !completer.isCompleted) {
+          completer.complete();
+        }
+        return;
+      }
+
       final startTime = _prepStartTimes.remove(videoId);
       if (startTime != null) {
         final elapsed = DateTime.now().difference(startTime).inMilliseconds;
         ShortsPerformanceTracker.recordFirstFrameTime(videoId, elapsed);
       }
       
-      if (_states[videoId] == VideoPlaybackState.preparing) {
+      if (_states[videoId] == VideoPlaybackState.preparing || _states[videoId] == VideoPlaybackState.active) {
         _states[videoId] = VideoPlaybackState.prepared;
       }
     } catch (_) {
       _states[videoId] = VideoPlaybackState.idle;
+    } finally {
+      final completer = _prepareCompleters.remove(videoId);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete();
+      }
     }
     notifyListeners();
   }
@@ -192,10 +307,18 @@ class ShortsPlaybackEngine extends ChangeNotifier {
       // Eviction policy: Reclaim player from the assignment furthest from activeIndex
       final furthestId = _getFurthestAssignedVideoId();
       if (furthestId != null) {
+        // Cancel in-flight prepare for the evicted video
+        _prepareQueue.remove(furthestId);
+        final completer = _prepareCompleters.remove(furthestId);
+        if (completer != null && !completer.isCompleted) {
+          completer.complete();
+        }
+
         player = _assignments.remove(furthestId);
         _controllers.remove(furthestId);
         _states.remove(furthestId);
         if (player != null) {
+          _playerOpenGeneration[player] = (_playerOpenGeneration[player] ?? 0) + 1;
           player.stop();
         }
       }
@@ -230,6 +353,13 @@ class ShortsPlaybackEngine extends ChangeNotifier {
   }
 
   void _evictPlayer(String videoId) {
+    // Cancel any in-flight prepare
+    _prepareQueue.remove(videoId);
+    final completer = _prepareCompleters.remove(videoId);
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
+
     final player = _assignments.remove(videoId);
     _controllers.remove(videoId);
     _states.remove(videoId);
@@ -252,6 +382,7 @@ class ShortsPlaybackEngine extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   void dispose() {
     pool.dispose();
     _assignments.clear();

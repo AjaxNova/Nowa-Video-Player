@@ -12,6 +12,7 @@ import 'package:nova_videoplayer/screen/newPlaylistPage/shorts_page/shorts_try_t
 import 'package:nova_videoplayer/screen/live_shorts/shorts_container_screen.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../settings/settings_page.dart';
+import '../functions/app_update_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.assets, required this.foldersWithVideos});
@@ -41,6 +42,13 @@ class _HomeScreenState extends State<HomeScreen> {
       const PlaylistOrFavorite(),
       const SettingsScreen(),
     ];
+    
+    // Silent automatic update check on startup after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        AppUpdateService.instance.checkForUpdates(context: context);
+      }
+    });
   }
 
   @override

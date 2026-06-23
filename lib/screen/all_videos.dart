@@ -26,14 +26,26 @@ class AllVideosPage extends StatefulWidget {
   State<AllVideosPage> createState() => _AllVideosPageState();
 }
 
-class _AllVideosPageState extends State<AllVideosPage> {
+class _AllVideosPageState extends State<AllVideosPage> with SingleTickerProviderStateMixin {
   bool isGridView = true;
   late ScrollController _scrollController;
+  late AnimationController _spinController;
+  bool _isGlowing = false;
 
   @override
   void initState() {
     super.initState();
     _scrollController = ScrollController();
+    _spinController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _spinController.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        setState(() => _isGlowing = false);
+        _spinController.reset();
+      }
+    });
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<VideoDataProvider>();
@@ -46,6 +58,7 @@ class _AllVideosPageState extends State<AllVideosPage> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _spinController.dispose();
     super.dispose();
   }
 
@@ -120,7 +133,33 @@ class _AllVideosPageState extends State<AllVideosPage> {
       padding: EdgeInsets.symmetric(horizontal: 16.w),
       child: Row(
         children: [
-          Text("NOVA", style: TextStyle(color: Colors.white, fontFamily: 'Inter', fontSize: 24.sp, fontWeight: FontWeight.bold, letterSpacing: 2)),
+          GestureDetector(
+            onLongPress: () {
+              setState(() => _isGlowing = true);
+              _spinController.forward();
+            },
+            child: RotationTransition(
+              turns: Tween(begin: 0.0, end: 1.0).animate(
+                CurvedAnimation(parent: _spinController, curve: Curves.easeInOut),
+              ),
+              child: Text(
+                "NOVA",
+                style: TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'Inter',
+                  fontSize: 24.sp,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 2,
+                  shadows: _isGlowing
+                      ? [
+                          Shadow(color: Colors.blueAccent.withOpacity(0.8), blurRadius: 20),
+                          Shadow(color: Colors.white.withOpacity(0.6), blurRadius: 10),
+                        ]
+                      : null,
+                ),
+              ),
+            ),
+          ),
           const Spacer(),
           IconButton(icon: Icon(isGridView ? Icons.grid_view_rounded : Icons.list_rounded, color: colorWhite, size: 22.sp), onPressed: _toggleView),
           IconButton(icon: Icon(Icons.sort_rounded, color: colorWhite, size: 22.sp), onPressed: () => _showSortBottomSheet(context)),
