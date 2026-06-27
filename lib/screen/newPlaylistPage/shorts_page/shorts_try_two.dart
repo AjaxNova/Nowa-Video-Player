@@ -406,12 +406,16 @@ class VideoPLayerPageForShorts extends StatefulWidget {
   State<VideoPLayerPageForShorts> createState() => _VideoPLayerPageForShortsState();
 }
 
-class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> with WidgetsBindingObserver {
+class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> with WidgetsBindingObserver, TickerProviderStateMixin {
   bool isTurboMode = false;
   bool hasError = false;
   bool _isManuallyPaused = false;
   bool _isPlayingCache = false;
   Uint8List? _cachedThumbnail;
+  double _swipeDragX = 0.0;       // live horizontal offset, drives the transform
+  bool _isSwipeDragging = false;  // true once we've committed to horizontal interpretation
+  bool _swipeDeleteTriggered = false; // guards against double-fire
+  late AnimationController _swipeSpringBackController;
 
   bool get _isActive => widget.activeIndexNotifier.value == widget.index;
   bool _wasActive = false;
@@ -454,6 +458,11 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     isLocalShortsTabActive.addListener(_syncPlayback);
     isShortsPiPMode.addListener(_syncPlayback);
     isShortsAutoPlay.addListener(_onAutoPlayChanged);
+
+    _swipeSpringBackController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
 
     WidgetsBinding.instance.addObserver(this);
     _loadThumbnail();
@@ -606,7 +615,118 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
     WidgetsBinding.instance.removeObserver(this);
     _playingSub?.cancel();
     _completedSub?.cancel();
+    _swipeSpringBackController.dispose();
     super.dispose();
+  }
+
+  void _resolveSwipeGesture(double velocityX) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    final distanceThreshold = screenWidth * 0.35;
+    final velocityThreshold = 800.0;
+
+    final shouldDelete = _swipeDragX > distanceThreshold || velocityX > velocityThreshold;
+
+    if (shouldDelete && !_swipeDeleteTriggered) {
+      _swipeDeleteTriggered = true;
+      _commitSwipeDelete();
+    } else {
+      _springBack();
+    }
+  }
+
+  void _springBack() {
+    final start = _swipeDragX;
+    _swipeSpringBackController.reset();
+    final anim = Tween<double>(begin: start, end: 0.0).animate(
+      CurvedAnimation(parent: _swipeSpringBackController, curve: Curves.easeOutCubic),
+    );
+    anim.addListener(() {
+      setState(() => _swipeDragX = anim.value);
+    });
+    _swipeSpringBackController.forward();
+  }
+
+  void _commitSwipeDelete() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    _swipeSpringBackController.reset();
+    final exitAnim = Tween<double>(begin: _swipeDragX, end: screenWidth * 1.2).animate(
+      CurvedAnimation(parent: _swipeSpringBackController, curve: Curves.easeOut),
+    );
+    exitAnim.addListener(() => setState(() => _swipeDragX = exitAnim.value));
+    _swipeSpringBackController.duration = const Duration(milliseconds: 220);
+    _swipeSpringBackController.forward().whenComplete(() {
+      _startUndoWindow();
+    });
+
+    try {
+      _player?.pause();
+    } catch (_) {}
+  }
+
+  void _startUndoWindow() {
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+    bool undone = false;
+
+    final controller = scaffoldMessenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Video removed',
+          style: TextStyle(fontSize: 12.sp),
+        ),
+        action: SnackBarAction(
+          label: 'UNDO',
+          textColor: colorGreen,
+          onPressed: () {
+            undone = true;
+            _undoSwipeDelete();
+          },
+        ),
+        duration: const Duration(seconds: 4),
+        backgroundColor: const Color(0xFF1A1A1A),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
+      ),
+    );
+
+    controller.closed.then((_) {
+      if (!undone) {
+        _finalizeSwipeDelete();
+      }
+    });
+  }
+
+  void _undoSwipeDelete() {
+    setState(() {
+      _swipeDeleteTriggered = false;
+      _swipeDragX = 0.0;
+    });
+    if (_isActive) {
+      _player?.play();
+    }
+  }
+
+  Future<void> _finalizeSwipeDelete() async {
+    try {
+      _player?.stop();
+    } catch (_) {}
+
+    final success = await FileOperations.deleteVideo(
+      context: context,
+      asset: widget.video,
+    );
+
+    if (mounted) widget.onVideoDeleted?.call(widget.video);
+
+    if (!success && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not delete file — removed from list', style: TextStyle(fontSize: 12.sp)),
+          backgroundColor: const Color(0xFF1A1A0A),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.r)),
+        ),
+      );
+    }
   }
 
   void _openSettingsMenu() {
@@ -1110,75 +1230,209 @@ class _VideoPLayerPageForShortsState extends State<VideoPLayerPageForShorts> wit
             };
           },
         ),
+        HorizontalDragGestureRecognizer: GestureRecognizerFactoryWithHandlers<HorizontalDragGestureRecognizer>(
+          () => HorizontalDragGestureRecognizer(),
+          (instance) {
+            instance
+              ..onStart = (details) {
+                final screenWidth = MediaQuery.of(context).size.width;
+                final screenHeight = MediaQuery.of(context).size.height;
+                final inTurboZone = details.localPosition.dx > screenWidth * 0.70 &&
+                    details.localPosition.dy > screenHeight * 0.30 &&
+                    details.localPosition.dy < screenHeight * 0.70;
+                if (inTurboZone || isTurboMode) return;
+                _isSwipeDragging = true;
+                _swipeDeleteTriggered = false;
+              }
+              ..onUpdate = (details) {
+                if (!_isSwipeDragging) return;
+                // Reject near-vertical drags outright — let PageView have them.
+                if (details.delta.dx.abs() < details.delta.dy.abs() * 1.5) return;
+                setState(() {
+                  _swipeDragX = (_swipeDragX + details.delta.dx).clamp(0.0, double.infinity);
+                });
+              }
+              ..onEnd = (details) {
+                if (!_isSwipeDragging) return;
+                _isSwipeDragging = false;
+                _resolveSwipeGesture(details.velocity.pixelsPerSecond.dx);
+              }
+              ..onCancel = () {
+                _isSwipeDragging = false;
+                _springBack();
+              };
+          },
+        ),
       },
-      child: Container(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // Thumbnail — covers full screen, same as video
-            if (_cachedThumbnail != null)
-              Image.memory(_cachedThumbnail!, fit: videoFit, width: double.infinity, height: double.infinity)
-            else
-              const SizedBox.shrink(),
-
-            // Video — always fills screen, crops if needed (YouTube behaviour)
-            if (_videoController != null)
-              Video(
-                controller: _videoController!,
-                controls: NoVideoControls,
-                fill: Colors.black,
-                fit: videoFit, // dynamically use contain or cover
-              ),
-
-            // Show subtle loading indicator while initializing
-            if (!loaded)
-              const Center(child: CircularProgressIndicator(color: Colors.white12)),
-            // Instagram-style 2X Speed Hint
-            if (isTurboMode)
-              Positioned(
-                top: 48.h,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
-                    decoration: BoxDecoration(
-                      color: Colors.black45,
-                      borderRadius: BorderRadius.circular(16.r),
-                      border: Border.all(color: Colors.white10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.fast_forward_rounded, color: colorGreen, size: 16.sp),
-                        SizedBox(width: 6.w),
-                        Text('>> 2X SPEED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11.sp, letterSpacing: 0.8)),
-                      ],
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── Backdrop revealed as the card slides right ──
+          if (_swipeDragX > 0)
+            Container(
+              color: const Color(0xFFE24B4A), // same red used in delete UI
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: EdgeInsets.only(left: 32.w),
+                  child: Opacity(
+                    opacity: (_swipeDragX / (MediaQuery.of(context).size.width * 0.35)).clamp(0.0, 1.0),
+                    child: Transform.scale(
+                      scale: 0.6 + 0.4 * (_swipeDragX / (MediaQuery.of(context).size.width * 0.35)).clamp(0.0, 1.0),
+                      child: Icon(Icons.delete_rounded, color: Colors.white, size: 36.sp),
                     ),
                   ),
                 ),
               ),
-            // Playback Indicator
-            if (_isManuallyPaused && isLocalShortsTabActive.value && !isTurboMode)
-              Center(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.2), shape: BoxShape.circle),
-                  child: const Icon(Icons.play_arrow_rounded, size: 52, color: Colors.white70),
-                ),
-              ),
-            // Side Settings Menu
-            Positioned(
-              right: 12.w,
-              bottom: 12.h,
-              child: IconButton(
-                icon: const Icon(Icons.more_vert_rounded, color: Colors.white54, size: 28),
-                onPressed: _openSettingsMenu,
-              ),
             ),
-          ],
-        ),
+
+          // ── The actual video card, translated + slightly scaled down ──
+          Transform.translate(
+            offset: Offset(_swipeDragX, 0),
+            child: (deviceTier != DeviceTier.lowEnd)
+                ? Transform.scale(
+                    scale: 1.0 - (0.04 * (_swipeDragX / MediaQuery.of(context).size.width)).clamp(0.0, 0.04),
+                    child: Container(
+                      color: Colors.black,
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          // Thumbnail — covers full screen, same as video
+                          if (_cachedThumbnail != null)
+                            Image.memory(_cachedThumbnail!, fit: videoFit, width: double.infinity, height: double.infinity)
+                          else
+                            const SizedBox.shrink(),
+
+                          // Video — always fills screen, crops if needed (YouTube behaviour)
+                          if (_videoController != null)
+                            Video(
+                              controller: _videoController!,
+                              controls: NoVideoControls,
+                              fill: Colors.black,
+                              fit: videoFit, // dynamically use contain or cover
+                            ),
+
+                          // Show subtle loading indicator while initializing
+                          if (!loaded)
+                            const Center(child: CircularProgressIndicator(color: Colors.white12)),
+                          // Instagram-style 2X Speed Hint
+                          if (isTurboMode)
+                            Positioned(
+                              top: 48.h,
+                              left: 0,
+                              right: 0,
+                              child: Center(
+                                child: Container(
+                                  padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black45,
+                                    borderRadius: BorderRadius.circular(16.r),
+                                    border: Border.all(color: Colors.white10),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.fast_forward_rounded, color: colorGreen, size: 16.sp),
+                                      SizedBox(width: 6.w),
+                                      Text('>> 2X SPEED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11.sp, letterSpacing: 0.8)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // Playback Indicator
+                          if (_isManuallyPaused && isLocalShortsTabActive.value && !isTurboMode)
+                            Center(
+                              child: Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.2), shape: BoxShape.circle),
+                                child: const Icon(Icons.play_arrow_rounded, size: 52, color: Colors.white70),
+                              ),
+                            ),
+                          // Side Settings Menu
+                          Positioned(
+                            right: 12.w,
+                            bottom: 12.h,
+                            child: IconButton(
+                              icon: const Icon(Icons.more_vert_rounded, color: Colors.white54, size: 28),
+                              onPressed: _openSettingsMenu,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : Container(
+                    color: Colors.black,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Thumbnail — covers full screen, same as video
+                        if (_cachedThumbnail != null)
+                          Image.memory(_cachedThumbnail!, fit: videoFit, width: double.infinity, height: double.infinity)
+                        else
+                          const SizedBox.shrink(),
+
+                        // Video — always fills screen, crops if needed (YouTube behaviour)
+                        if (_videoController != null)
+                          Video(
+                            controller: _videoController!,
+                            controls: NoVideoControls,
+                            fill: Colors.black,
+                            fit: videoFit, // dynamically use contain or cover
+                          ),
+
+                        // Show subtle loading indicator while initializing
+                        if (!loaded)
+                          const Center(child: CircularProgressIndicator(color: Colors.white12)),
+                        // Instagram-style 2X Speed Hint
+                        if (isTurboMode)
+                          Positioned(
+                            top: 48.h,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Container(
+                                padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 6.h),
+                                decoration: BoxDecoration(
+                                  color: Colors.black45,
+                                  borderRadius: BorderRadius.circular(16.r),
+                                  border: Border.all(color: Colors.white10),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.fast_forward_rounded, color: colorGreen, size: 16.sp),
+                                    SizedBox(width: 6.w),
+                                    Text('>> 2X SPEED', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11.sp, letterSpacing: 0.8)),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        // Playback Indicator
+                        if (_isManuallyPaused && isLocalShortsTabActive.value && !isTurboMode)
+                          Center(
+                            child: Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.2), shape: BoxShape.circle),
+                              child: const Icon(Icons.play_arrow_rounded, size: 52, color: Colors.white70),
+                            ),
+                          ),
+                        // Side Settings Menu
+                        Positioned(
+                          right: 12.w,
+                          bottom: 12.h,
+                          child: IconButton(
+                            icon: const Icon(Icons.more_vert_rounded, color: Colors.white54, size: 28),
+                            onPressed: _openSettingsMenu,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
       ),
     );
   }
